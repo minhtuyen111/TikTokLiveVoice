@@ -106,11 +106,6 @@ class AuthRepo(private val store: SessionStore) {
     }
 
     suspend fun signUp(username: String, email: String, password: String): AuthResult = net({
-        // Kiểm tra trùng tên trước (RPC công khai chỉ trả true/false)
-        val avail = Http.client.newCall(
-            req("/rest/v1/rpc/username_available").post(body("p_username" to username)).build()
-        ).await()
-        if (avail.ok && avail.body.trim() == "false") return@net AuthResult.Fail("Tên đăng nhập đã được sử dụng")
         val r = Http.client.newCall(
             req("/auth/v1/signup").post(
                 body("email" to email.trim(), "password" to password,
