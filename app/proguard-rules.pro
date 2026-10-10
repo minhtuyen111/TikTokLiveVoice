@@ -1,0 +1,3 @@
+-keep class com.tlv.app.live.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
