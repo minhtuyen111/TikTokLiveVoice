@@ -34,9 +34,11 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
     @Volatile private var cloudFails = 0
     @Volatile private var cloudDownUntil = 0L
     private var player: MediaPlayer? = null
+    @Volatile private var offlineVi: OfflineVietnameseTts? = null
     private val cloudOn get() = cloud?.available == true && useCloud
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     @Volatile private var appliedKey: String? = null
+    @Volatile private var stopRequested = false
 
     private val _ready = MutableStateFlow(false)
     val ready: StateFlow<Boolean> = _ready
@@ -125,8 +127,37 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
 
     /** Đọc và chờ đến khi xong. Trả false nếu lỗi hoặc bị dừng. */
     suspend fun speak(text: String, volume: Float = 1f): Boolean {
-        if (cloudOn) speakCloud(text, volume)?.let { return it }
+        stopRequested = false
+        if (cloudOn) {
+            val cloudResult = speakCloud(text, volume)
+            if (cloudResult == true) return true
+            // A cloud/network failure should not make Vietnamese comments silent on ROMs
+            // that have no Vietnamese system voice. Keep cloud playback as first choice.
+            if ((cloudResult == null || cloudResult == false) && isVietnamese() && !stopRequested) {
+                speakOfflineVietnamese(text, volume)?.let { if (it) return true }
+            }
+            if (cloudResult == false && stopRequested) return false // user pressed Stop; don't restart speech
+        } else if (isVietnamese()) {
+            speakOfflineVietnamese(text, volume)?.let { if (it) return true }
+        }
         return speakSystem(text, volume)
+    }
+
+    private fun isVietnamese() = curLang.equals("vi", true) || curLang.startsWith("vi-", true)
+
+    /** null means model/runtime unavailable; false means synthesis/playback failed. */
+    private suspend fun speakOfflineVietnamese(text: String, volume: Float): Boolean? {
+        val engine = try {
+            offlineVi ?: synchronized(this) {
+                offlineVi ?: OfflineVietnameseTts(context).also { offlineVi = it }
+            }
+        } catch (e: Throwable) {
+            _error.value = "Không khởi tạo được giọng Việt offline: ${e.message ?: "lỗi model"}"
+            return null
+        }
+        return runCatching { engine.speak(text, volume, curRate) }
+            .onFailure { _error.value = "Giọng Việt offline gặp lỗi: ${it.message ?: "không phát được"}" }
+            .getOrNull()
     }
 
     /** true = đọc xong, false = bị dừng/lỗi phát, null = không lấy được giọng online (rơi về engine hệ thống). */
@@ -187,7 +218,9 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
     }
 
     fun stop() {
+        stopRequested = true
         stopPlayer()
+        offlineVi?.stop()
         tts?.stop()
         pending.values.forEach { it.complete(false) }
         pending.clear()
@@ -199,6 +232,8 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
         stop()
         tts?.shutdown()
         tts = null
+        offlineVi?.shutdown()
+        offlineVi = null
         sysReady = false
         appliedKey = null
         _ready.value = false

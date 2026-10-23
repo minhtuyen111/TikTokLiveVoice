@@ -31,6 +31,26 @@ jobs:
         with:
           gradle-version: 8.9
 
+      # Offline Vietnamese neural voice + Sherpa ONNX Android runtime.
+      # Voice model is vais1000-medium (22.05 kHz); keep attribution in THIRD_PARTY_NOTICES.md.
+      - name: Prepare offline Vietnamese TTS assets
+        run: |
+          mkdir -p app/libs app/src/main/assets/tts_vi "$RUNNER_TEMP/tts_vi"
+          curl -fL --retry 3 --retry-delay 2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar \
+            -o app/libs/sherpa-onnx-1.13.8.aar
+          curl -fL --retry 3 --retry-delay 2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-vi_VN-vais1000-medium.tar.bz2 \
+            -o "$RUNNER_TEMP/vais1000.tar.bz2"
+          tar -xjf "$RUNNER_TEMP/vais1000.tar.bz2" -C "$RUNNER_TEMP/tts_vi"
+          MODEL="$(find "$RUNNER_TEMP/tts_vi" -name 'vi_VN-vais1000-medium.onnx' -type f | head -n 1)"
+          test -n "$MODEL"
+          MODEL_DIR="$(dirname "$MODEL")"
+          cp "$MODEL" app/src/main/assets/tts_vi/
+          cp "$MODEL_DIR/tokens.txt" app/src/main/assets/tts_vi/
+          if [ -d "$MODEL_DIR/espeak-ng-data" ]; then cp -a "$MODEL_DIR/espeak-ng-data" app/src/main/assets/tts_vi/; fi
+          ls -lh app/libs/sherpa-onnx-1.13.8.aar app/src/main/assets/tts_vi/
+
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --no-daemon
 

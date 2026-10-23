@@ -72,6 +72,7 @@ android {
         compose = true
         buildConfig = true
     }
+    androidResources { noCompress += "onnx" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     lint { checkReleaseBuilds = false; abortOnError = false }
 }
@@ -94,6 +95,9 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Sherpa-ONNX runtime (downloaded by CI; used for bundled offline Vietnamese TTS).
+    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

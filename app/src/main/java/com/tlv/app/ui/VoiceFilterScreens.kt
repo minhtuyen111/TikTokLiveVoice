@@ -93,7 +93,7 @@ fun VoiceScreen() {
                 }
             }
         }
-        SwitchRow("Giọng chất lượng cao (online)", "Giọng nam/nữ trong trẻo, chạy trên mọi điện thoại, cần mạng. Mất mạng sẽ tự dùng giọng của máy.", s.ttsCloud) { v ->
+        SwitchRow("Giọng chất lượng cao (online)", "Giọng online chất lượng cao cần mạng; khi lỗi, tiếng Việt có giọng offline tích hợp, các ngôn ngữ khác dùng giọng hệ thống.", s.ttsCloud) { v ->
             Graph.update { copy(ttsCloud = v) }
         }
 
