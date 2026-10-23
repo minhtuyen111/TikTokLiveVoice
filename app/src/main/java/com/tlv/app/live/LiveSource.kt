@@ -22,6 +22,7 @@ sealed interface Outcome {
  *
  * Giao thức tin nhắn JSON:
  *  {"type":"comment","user":"abc","text":"xin chào"}
+ *  {"type":"event","kind":"follow|share|gift","user":"abc","name":"Rose","count":1}
  *  {"type":"status","state":"connected"}
  *  {"type":"status","state":"ended"}                    -> livestream đã kết thúc
  *  {"type":"status","state":"error","fatal":true,"message":"..."}
@@ -39,9 +40,10 @@ class LiveSource {
         token: String?,
         onConnected: () -> Unit,
         onComment: (user: String, text: String) -> Unit,
+        onEvent: (kind: String, user: String, name: String, count: Int) -> Unit = { _, _, _, _ -> },
     ): Outcome {
         val url = buildUrl(bridge, channel)
-            ?: return Outcome.Fatal("Địa chỉ cầu nối phải bắt đầu bằng wss:// (HTTPS)")
+            ?: return Outcome.Fatal("Dịch vụ kết nối chưa sẵn sàng. Vui lòng thử lại sau hoặc liên hệ quản trị viên")
         return suspendCancellableCoroutine { cont ->
             fun finish(o: Outcome) { if (cont.isActive) cont.resume(o) }
 
@@ -54,6 +56,9 @@ class LiveSource {
                         val o = runCatching { JSONObject(text) }.getOrNull() ?: return
                         when (o.optString("type")) {
                             "comment" -> onComment(o.optString("user").take(64), o.optString("text").take(1000))
+                            "event" -> o.optString("kind").takeIf { it == "follow" || it == "share" || it == "gift" }?.let {
+                                onEvent(it, o.optString("user").take(64), o.optString("name").take(40), o.optInt("count", 1).coerceIn(1, 9999))
+                            }
                             "status" -> when (o.optString("state")) {
                                 "connected" -> onConnected()
                                 "ended" -> { webSocket.close(1000, null); finish(Outcome.Ended) }

@@ -12,6 +12,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tlv.app.Graph
+import android.content.Intent
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
+import com.tlv.app.tts.VOICE_LANGS
+import com.tlv.app.tts.voiceLangOf
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -23,15 +29,17 @@ fun VoiceScreen() {
     val ttsReady by Graph.tts.ready.collectAsState()
     val ttsErr by Graph.tts.error.collectAsState()
     val toast = LocalToaster.current
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { Graph.tts.ensureInit() }
     DisposableEffect(Unit) { onDispose { if (!Graph.engine.active) Graph.tts.shutdown() } }
 
-    val langs = remember(ttsReady) { if (ttsReady) Graph.tts.languages() else emptyList() }
-    val voices = remember(ttsReady, s.ttsLang) {
-        if (ttsReady) Graph.tts.voices().filter { it.locale.toLanguageTag() == s.ttsLang } else emptyList()
+    val cur = voiceLangOf(s.ttsLang)
+    val voices = remember(ttsReady, cur.tag) {
+        if (ttsReady) Graph.tts.voices().filter { it.locale.language == cur.tag.substringBefore('-') }
+            .sortedWith(compareBy({ it.isNetworkConnectionRequired }, { it.name })) else emptyList()
     }
 
     Column(
@@ -44,44 +52,93 @@ fun VoiceScreen() {
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Nghe thử giọng", fontWeight = FontWeight.Bold)
-                    Dim(if (ttsReady) "Engine sẵn sàng" else "Đang khởi tạo engine…")
+                    Dim(if (ttsReady) (if (s.ttsCloud) "Giọng online sẵn sàng" else "Engine sẵn sàng") else "Đang khởi tạo engine…")
                 }
             }
             Spacer(Modifier.height(12.dp))
             NeonButton("Nghe thử", {
                 busy = true
                 scope.launch {
-                    val err = Graph.engine.preview("Xin chào, đây là giọng đọc thử nghiệm.")
+                    val err = Graph.engine.preview(cur.sample)
                     busy = false
                     if (err != null) toast.error(err)
                 }
             }, Modifier.fillMaxWidth(), icon = Icons.Filled.PlayArrow,
                 state = if (busy) BtnState.Loading else BtnState.Idle, enabled = ttsReady)
         }
-        if (ttsErr != null) {
-            GlassCard(Modifier.fillMaxWidth(), tint = Bad) { Text(ttsErr.orEmpty(), color = Bad) }
+        if (ttsErr != null && !s.ttsCloud) {
+            GlassCard(Modifier.fillMaxWidth(), tint = Bad) {
+                Text(ttsErr.orEmpty(), color = Bad)
+                Spacer(Modifier.height(8.dp))
+                NeonButton("Cài thêm dữ liệu giọng", {
+                    runCatching {
+                        ctx.startActivity(Intent(android.speech.tts.TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.onFailure { toast.error("Không mở được trang cài giọng") }
+                }, Modifier.fillMaxWidth(), outlined = true, icon = Icons.Filled.Download)
+            }
         }
 
-        SectionTitle("Ngôn ngữ và giọng")
-        Dropdown("Ngôn ngữ", s.ttsLang, langs.ifEmpty { listOf(s.ttsLang) }) { l -> Graph.update { copy(ttsLang = l, ttsVoice = "") } }
-        Dropdown("Giọng đọc", s.ttsVoice.ifEmpty { "Mặc định" }, listOf("Mặc định") + voices.map { it.name }) { v ->
-            Graph.update { copy(ttsVoice = if (v == "Mặc định") "" else v) }
+        SectionTitle("Giọng nam / nữ")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf("female" to "Giọng nữ", "male" to "Giọng nam").forEach { (id, label) ->
+                val on = s.ttsGender == id
+                GlassCard(
+                    Modifier.weight(1f).clickable { Graph.update { copy(ttsGender = id) } },
+                    tint = if (on) MaterialTheme.colorScheme.primary else Sky, corner = 16.dp,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                        if (on) Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
         }
+        SwitchRow("Giọng chất lượng cao (online)", "Giọng nam/nữ trong trẻo, chạy trên mọi điện thoại, cần mạng. Mất mạng sẽ tự dùng giọng của máy.", s.ttsCloud) { v ->
+            Graph.update { copy(ttsCloud = v) }
+        }
+
+        SectionTitle("Ngôn ngữ giọng đọc")
+        VOICE_LANGS.forEach { l ->
+            val on = l.tag == cur.tag
+            GlassCard(
+                Modifier.fillMaxWidth().clickable { Graph.update { copy(ttsLang = l.tag, ttsVoice = "") } },
+                tint = if (on) MaterialTheme.colorScheme.primary else Sky, corner = 16.dp,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(l.native, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                        Dim(l.tag)
+                    }
+                    if (on) Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        if (!s.ttsCloud) Dropdown("Giọng đọc", voices.firstOrNull { it.name == s.ttsVoice }?.let { voiceLabel(it) } ?: "Mặc định",
+            listOf("" to "Mặc định") + voices.map { it.name to voiceLabel(it) }) { v -> Graph.update { copy(ttsVoice = v) } }
+        SwitchRow("Tự nhận ngôn ngữ bình luận", "Bình luận tiếng Anh đọc giọng Anh, tiếng Trung đọc giọng Trung, tiếng Nhật, Hàn… Chữ Latin không dấu mơ hồ sẽ dùng ngôn ngữ đã chọn.", s.ttsAuto) { v ->
+            Graph.update { copy(ttsAuto = v) }
+        }
+        if (!s.ttsCloud) Dim("Nếu thiếu giọng của một ngôn ngữ, cài thêm trong Cài đặt Android > Chuyển văn bản thành giọng nói.")
 
         SectionTitle("Âm thanh")
+        SliderRow("Âm lượng đọc", s.ttsVolume, 0f..1f, { "${(it * 100).roundToInt()}%" }) { v -> Graph.update { copy(ttsVolume = (v * 20).roundToInt() / 20f) } }
         SliderRow("Tốc độ đọc", s.ttsRate, 0.5f..2.5f, { "%.1fx".format(it) }) { v -> Graph.update { copy(ttsRate = (v * 10).roundToInt() / 10f) } }
         SliderRow("Cao độ", s.ttsPitch, 0.5f..2f, { "%.1f".format(it) }) { v -> Graph.update { copy(ttsPitch = (v * 10).roundToInt() / 10f) } }
-        Dim("Âm lượng dùng âm lượng nội dung của thiết bị.")
+        Dim("Âm lượng đọc là mức tương đối so với âm lượng nội dung của máy: chỉnh nút âm lượng cho to hơn.")
 
         SectionTitle("Nội dung đọc")
         SwitchRow("Đọc tên người dùng", "Đọc \"tên nói nội dung\" thay vì chỉ nội dung", s.readUsername) { v -> Graph.update { copy(readUsername = v) } }
         SwitchRow("Đọc emoji", "Tắt: bỏ emoji khỏi phần đọc", s.readEmoji) { v -> Graph.update { copy(readEmoji = v) } }
+        SwitchRow("Đọc ký hiệu", "Đọc dấu câu và biểu tượng cảm xúc như . ! ? :))) < >", s.readSymbols) { v -> Graph.update { copy(readSymbols = v) } }
     }
 }
 
+private fun voiceLabel(v: android.speech.tts.Voice) =
+    v.name + if (v.isNetworkConnectionRequired) " · online" else " · offline"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Dropdown(label: String, value: String, options: List<String>, onPick: (String) -> Unit) {
+internal fun Dropdown(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(open, { open = it }) {
         OutlinedTextField(
@@ -90,7 +147,7 @@ private fun Dropdown(label: String, value: String, options: List<String>, onPick
             modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
         )
         ExposedDropdownMenu(open, { open = false }) {
-            options.forEach { o -> DropdownMenuItem({ Text(o) }, { onPick(o); open = false }) }
+            options.forEach { (id, text) -> DropdownMenuItem({ Text(text) }, { onPick(id); open = false }) }
         }
     }
 }

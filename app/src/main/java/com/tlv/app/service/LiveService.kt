@@ -18,12 +18,17 @@ import com.tlv.app.live.ConnState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 /** Foreground Service (mediaPlayback): giữ tiến trình để nhận bình luận và đọc TTS khi app ở nền. */
 class LiveService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var observer: Job? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** Vuốt app khỏi danh sách gần đây: dịch vụ nền vẫn chạy, không làm gì cả. */
+    override fun onTaskRemoved(rootIntent: Intent?) { /* giữ phiên LIVE */ }
 
     override fun onCreate() {
         super.onCreate()
@@ -42,6 +47,11 @@ class LiveService : Service() {
                     this, NOTIF_ID, build("Đang kết nối @$ch…", paused = false, ongoing = true),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
                 )
+                Graph.refreshMemesAsync()
+                if (wakeLock?.isHeld != true) {
+                    wakeLock = getSystemService(android.os.PowerManager::class.java)
+                        .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "voicelive:live").apply { setReferenceCounted(false); acquire() }
+                }
                 engine.connect(ch)
                 observe()
             }
@@ -60,7 +70,7 @@ class LiveService : Service() {
         val e = Graph.engine
         observer = scope.launch {
             combine(e.conn, e.paused, e.stats, e.channel) { c, p, s, ch -> arrayOf<Any>(c, p, s, ch) }
-                .conflate()
+                .sample(1000)
                 .collect { a ->
                     val c = a[0] as ConnState
                     val paused = a[1] as Boolean
@@ -120,6 +130,7 @@ class LiveService : Service() {
     override fun onDestroy() {
         observer?.cancel()
         scope.cancel()
+        runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
         Graph.engine.disconnect() // giải phóng TTS và kết nối khi dịch vụ thực sự dừng
         super.onDestroy()
     }

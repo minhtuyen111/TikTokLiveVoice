@@ -4,6 +4,9 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -206,23 +209,51 @@ fun SecurityScreen(onLoggedOut: () -> Unit) {
 @Composable
 fun AppearanceScreen() {
     val s by Graph.settings.collectAsState()
-    val accents = listOf(Neon to "Tím neon", Indigo to "Xanh tím", Sky to "Xanh dương")
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val accentNames = listOf("Tím neon", "Xanh tím", "Xanh dương", "Hồng", "Xanh lá", "Cam")
+    val bgNames = listOf("Đêm", "Đen AMOLED", "Đại dương", "Rừng", "Hoàng hôn", "Xám đá")
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionTitle("Ngôn ngữ ứng dụng")
+        APP_LANGS.forEach { (code, name) ->
+            val on = s.appLang == code
+            GlassCard(Modifier.fillMaxWidth().clickable { Graph.update { copy(appLang = code) } }, corner = 16.dp,
+                tint = if (on) MaterialTheme.colorScheme.primary else Sky) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Text(name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                    if (on) Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
         SwitchRow("Giao diện tối", "Tắt để dùng giao diện sáng", s.darkTheme) { v -> Graph.update { copy(darkTheme = v) } }
-        SectionTitle("Màu nhấn")
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            accents.forEachIndexed { i, (c, name) ->
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { Graph.update { copy(accent = i) } }) {
+        SectionTitle("Màu nền ứng dụng")
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            BG_PALETTES.forEachIndexed { i, p ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { Graph.update { copy(bgStyle = i) } }) {
                     Box(
-                        Modifier.size(52.dp).clip(CircleShape).background(c).then(
-                            if (s.accent == i) Modifier.padding(0.dp) else Modifier
-                        ), contentAlignment = Alignment.Center,
-                    ) { if (s.accent == i) Icon(Icons.Filled.Check, "Đang chọn", tint = Color.White) }
-                    Text(name, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        Modifier.size(58.dp).clip(RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(p.bg, p.surfaceHi)))
+                            .border(if (s.bgStyle == i) 3.dp else 1.dp, if (s.bgStyle == i) MaterialTheme.colorScheme.primary else Color(0x33FFFFFF), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) { if (s.bgStyle == i) Icon(Icons.Filled.Check, "Đang chọn", tint = Color.White) }
+                    Text(bgNames[i], fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+        }
+        SectionTitle("Màu nhấn")
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            ACCENTS.forEachIndexed { i, c ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { Graph.update { copy(accent = i) } }) {
+                    Box(Modifier.size(52.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
+                        if (s.accent == i) Icon(Icons.Filled.Check, "Đang chọn", tint = Color.White)
+                    }
+                    Text(accentNames[i], fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
         SwitchRow("Giảm chuyển động", "Tắt hiệu ứng lặp liên tục (sóng âm, chấm LIVE)", s.reduceMotion) { v -> Graph.update { copy(reduceMotion = v) } }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -250,6 +281,7 @@ fun SettingsHub(go: (String) -> Unit) {
     data class HubItem(val route: String, val title: String, val icon: ImageVector, val sub: String)
     val rows = listOf(
         HubItem("voice", "Giọng đọc", Icons.Filled.RecordVoiceOver, "Giọng, tốc độ, cao độ"),
+        HubItem("memes", "Âm thanh meme", Icons.Filled.MusicNote, "Tiếng theo dõi, chia sẻ, tặng quà"),
         HubItem("filters", "Bộ lọc bình luận", Icons.Filled.FilterAlt, "Từ khóa, chống spam, hàng đợi"),
         HubItem("appearance", "Giao diện", Icons.Filled.Palette, "Sáng/tối, màu nhấn, giảm chuyển động"),
         HubItem("notifications", "Thông báo", Icons.Filled.Notifications, "Điều khiển nền, tối ưu pin"),
@@ -285,27 +317,11 @@ private fun TextPage(vararg parts: Pair<String, String>) {
 
 @Composable
 fun HelpScreen() = TextPage(
-    "Cách dùng nhanh" to "1) Đăng ký và xác minh email. 2) Vào Kết nối TikTok LIVE, nhập địa chỉ cầu nối (wss://) và tên tài khoản. 3) Bấm Kết nối. Bình luận sẽ hiện ra và được đọc lần lượt.",
+    "Cách dùng nhanh" to "1) Đăng ký và xác minh email. 2) Vào Kết nối TikTok LIVE, nhập tên kênh đang LIVE (ví dụ @tenkenh). 3) Bấm Kết nối. Bình luận sẽ hiện ra và được đọc lần lượt, không cần cài đặt thêm.",
+    "Âm thanh meme" to "Vào Âm thanh meme để bật, tắt hoặc chọn tiếng cho sự kiện theo dõi, chia sẻ, tặng quà. Thư viện âm thanh do quản trị viên cung cấp.",
     "Không nghe thấy tiếng?" to "Kiểm tra âm lượng nội dung, vào Giọng đọc và bấm Nghe thử. Nếu báo thiếu dữ liệu, cài giọng tiếng Việt trong Cài đặt Android > Chuyển văn bản thành giọng nói.",
     "Bị ngắt khi tắt màn hình?" to "Vào Thông báo > Cài đặt tối ưu hóa pin và cho phép app chạy nền. Android vẫn có thể dừng dịch vụ khi thiếu RAM; hãy kết nối lại nếu cần.",
-    "Không có bình luận?" to "Cầu nối phụ thuộc thư viện không chính thức; khi TikTok đổi giao thức có thể cần cập nhật cầu nối. Livestream phải đang công khai và truy cập được.",
-)
-
-@Composable
-fun TermsScreen() = TextPage(
-    "" to "Bản mẫu — hãy thay bằng điều khoản được rà soát pháp lý trước khi phát hành.",
-    "Sử dụng dịch vụ" to "Ứng dụng chuyển bình luận từ các livestream công khai thành giọng nói. Bạn chịu trách nhiệm tuân thủ điều khoản của TikTok và pháp luật khi sử dụng.",
-    "Tài khoản" to "Bạn bảo mật thông tin đăng nhập và chịu trách nhiệm về hoạt động trong tài khoản. Tài khoản có thể bị khóa khi vi phạm.",
-    "Giới hạn trách nhiệm" to "Ứng dụng được cung cấp nguyên trạng; chức năng nhận bình luận phụ thuộc dịch vụ bên thứ ba và có thể ngừng hoạt động.",
-)
-
-@Composable
-fun PrivacyScreen() = TextPage(
-    "" to "Bản mẫu — hãy thay bằng chính sách được rà soát pháp lý trước khi phát hành.",
-    "Dữ liệu thu thập" to "Email, tên đăng nhập, trạng thái xác minh và thời điểm tạo tài khoản lưu trên máy chủ xác thực. Mật khẩu được băm bởi hệ thống xác thực, không lưu dạng văn bản thuần.",
-    "Trên thiết bị" to "Cài đặt và số liệu tổng hợp các phiên LIVE được lưu cục bộ. Nội dung bình luận chỉ nằm trong bộ nhớ trong phiên và không được lưu lâu dài.",
-    "TikTok" to "Ứng dụng không yêu cầu hay lưu mật khẩu TikTok của bạn.",
-    "Quyền của bạn" to "Bạn có thể xóa lịch sử cục bộ và gửi yêu cầu xóa tài khoản trong trang Bảo mật.",
+    "Không có bình luận?" to "Livestream phải đang phát công khai. Nếu nhiều kênh cùng lỗi, dịch vụ nhận bình luận có thể đang bảo trì; hãy thử lại sau hoặc báo qua Discord.",
 )
 
 @Composable
@@ -326,17 +342,17 @@ fun AboutScreen() {
             modifier = Modifier.size(148.dp).clip(CircleShape),
         )
         Spacer(Modifier.height(16.dp))
-        Text("TikTok Live Voice", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("Voice Live TikTok", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Dim("Phiên bản ${BuildConfig.VERSION_NAME}", Modifier.padding(top = 4.dp))
         Dim("Biến bình luận LIVE công khai thành giọng nói.", Modifier.padding(top = 12.dp))
-        Dim("Không liên kết chính thức với TikTok hoặc Discord.", Modifier.padding(top = 4.dp))
+        Dim("Không liên kết chính thức với TikTok hoặc Discord. Tên và biểu tượng thuộc về chủ sở hữu tương ứng.", Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = { openLink("https://www.tiktok.com/@minhtuyen523?_r=1&_t=ZS-9AQqF302TUC") },
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
         ) {
-            Icon(Icons.Filled.MusicNote, contentDescription = null)
+            FloatingLogo(com.tlv.app.R.drawable.logo_tiktok, 28.dp, 0)
             Spacer(Modifier.width(10.dp))
             Text("TikTok của nhà phát triển")
         }
@@ -346,7 +362,7 @@ fun AboutScreen() {
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
         ) {
-            Icon(Icons.Filled.Groups, contentDescription = null)
+            FloatingLogo(com.tlv.app.R.drawable.logo_discord, 28.dp, 1)
             Spacer(Modifier.width(10.dp))
             Text("Tham gia Discord")
         }

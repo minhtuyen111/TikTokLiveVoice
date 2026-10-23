@@ -29,6 +29,17 @@ class SettingsRepo(private val context: Context) {
         val accent = intPreferencesKey("accent")
         val reduce = booleanPreferencesKey("reduce")
         val notifCtl = booleanPreferencesKey("notifCtl")
+        val mFollow = stringPreferencesKey("mFollow")
+        val mShare = stringPreferencesKey("mShare")
+        val mGift = stringPreferencesKey("mGift")
+        val announce = booleanPreferencesKey("announce")
+        val ttsVol = floatPreferencesKey("ttsVol")
+        val ttsAuto = booleanPreferencesKey("ttsAuto")
+        val readSym = booleanPreferencesKey("readSym")
+        val bgStyle = intPreferencesKey("bgStyle")
+        val appLang = stringPreferencesKey("appLang")
+        val gender = stringPreferencesKey("ttsGender")
+        val cloud = booleanPreferencesKey("ttsCloud")
     }
 
     private fun split(s: String?) = s.orEmpty().split('\n').map { it.trim() }.filter { it.isNotEmpty() }
@@ -54,6 +65,17 @@ class SettingsRepo(private val context: Context) {
             accent = p[K.accent] ?: d.accent,
             reduceMotion = p[K.reduce] ?: d.reduceMotion,
             notifShowControls = p[K.notifCtl] ?: d.notifShowControls,
+            memeFollow = p[K.mFollow] ?: d.memeFollow,
+            memeShare = p[K.mShare] ?: d.memeShare,
+            memeGift = p[K.mGift] ?: d.memeGift,
+            announceEvents = p[K.announce] ?: d.announceEvents,
+            ttsVolume = p[K.ttsVol] ?: d.ttsVolume,
+            ttsAuto = p[K.ttsAuto] ?: d.ttsAuto,
+            readSymbols = p[K.readSym] ?: d.readSymbols,
+            bgStyle = p[K.bgStyle] ?: d.bgStyle,
+            appLang = p[K.appLang] ?: d.appLang,
+            ttsGender = p[K.gender] ?: d.ttsGender,
+            ttsCloud = p[K.cloud] ?: d.ttsCloud,
         )
     }
 
@@ -70,6 +92,10 @@ class SettingsRepo(private val context: Context) {
             p[K.bridge] = s.bridgeUrl; p[K.channel] = s.lastChannel
             p[K.dark] = s.darkTheme; p[K.accent] = s.accent; p[K.reduce] = s.reduceMotion
             p[K.notifCtl] = s.notifShowControls
+            p[K.mFollow] = s.memeFollow; p[K.mShare] = s.memeShare; p[K.mGift] = s.memeGift
+            p[K.announce] = s.announceEvents
+            p[K.ttsVol] = s.ttsVolume; p[K.ttsAuto] = s.ttsAuto; p[K.readSym] = s.readSymbols; p[K.bgStyle] = s.bgStyle; p[K.appLang] = s.appLang
+            p[K.gender] = s.ttsGender; p[K.cloud] = s.ttsCloud
         }
     }
 }

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.sp
 import com.tlv.app.Graph
 import com.tlv.app.live.Comment
 import com.tlv.app.live.CommentStatus
+import kotlinx.coroutines.flow.sample
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,10 +28,12 @@ private enum class Tab(val label: String) { ALL("Tất cả"), PENDING("Chờ đ
 
 private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun CommentsScreen() {
-    val all by Graph.engine.comments.collectAsState()
+    // Gộp cập nhật 150 ms/lần: bình luận dồn dập không làm danh sách vẽ lại liên tục (đỡ giật, đỡ nóng).
+    val flow = remember { Graph.engine.comments.sample(150) }
+    val all by flow.collectAsState(Graph.engine.comments.value)
     val stats by Graph.engine.stats.collectAsState()
     var query by remember { mutableStateOf("") }
     var tab by remember { mutableStateOf(Tab.ALL) }

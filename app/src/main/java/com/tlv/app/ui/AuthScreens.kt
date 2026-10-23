@@ -16,6 +16,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
@@ -31,30 +35,51 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun LogoMark(size: androidx.compose.ui.unit.Dp = 72.dp) {
-    val hs = listOf(0.35f, 0.65f, 1f, 0.55f)
+    val reduce = LocalMotion.current.reduce
+    val hs = listOf(0.35f, 0.65f, 1f, 0.55f, 0.8f)
+    val t = if (reduce) null else rememberInfiniteTransition(label = "logo").animateFloat(
+        0f, 1f, infiniteRepeatable(tween(1300, easing = LinearEasing)), label = "t",
+    )
+    val brush = remember { Brush.verticalGradient(listOf(Sky, Neon)) }
     Row(
         Modifier.size(size).clip(RoundedCornerShape(size / 3.2f))
-            .background(Brush.linearGradient(listOf(Neon.copy(alpha = 0.25f), Sky.copy(alpha = 0.25f))))
+            .background(Brush.linearGradient(listOf(Neon.copy(alpha = 0.28f), Sky.copy(alpha = 0.28f))))
             .padding(size / 5),
-        horizontalArrangement = Arrangement.spacedBy(size / 16, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(size / 18, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        hs.forEach { h ->
-            Box(Modifier.width(size / 9).fillMaxHeight(h).clip(CircleShape)
-                .background(Brush.verticalGradient(listOf(Sky, Neon))))
+        hs.forEachIndexed { i, h ->
+            Box(Modifier.width(size / 11).fillMaxHeight(h).graphicsLayer {
+                val v = t?.value
+                scaleY = if (v == null) 1f else 0.55f + 0.45f * kotlin.math.abs(kotlin.math.sin((v * 2f + i * 0.22f) * Math.PI.toFloat()))
+            }.clip(CircleShape).background(brush))
         }
     }
 }
 
+/** Nền đăng nhập: hai quầng sáng màu trôi chậm (vẽ bằng gradient, không dùng blur nên nhẹ máy). */
 @Composable
 private fun AuthBackdrop(content: @Composable ColumnScope.() -> Unit) {
+    val reduce = LocalMotion.current.reduce
+    val primary = MaterialTheme.colorScheme.primary
+    val bg = MaterialTheme.colorScheme.background
+    val drift = if (reduce) null else rememberInfiniteTransition(label = "drift").animateFloat(
+        0f, 1f, infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Reverse), label = "d",
+    )
     Box(
-        Modifier.fillMaxSize().background(
-            Brush.radialGradient(
-                listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), MaterialTheme.colorScheme.background),
-                radius = 1100f,
+        Modifier.fillMaxSize().background(bg).drawBehind {
+            val d = drift?.value ?: 0.5f
+            drawCircle(
+                Brush.radialGradient(listOf(primary.copy(alpha = 0.30f), Color.Transparent),
+                    center = Offset(size.width * (0.15f + 0.5f * d), size.height * 0.12f), radius = size.width * 0.9f),
+                radius = size.width * 0.9f, center = Offset(size.width * (0.15f + 0.5f * d), size.height * 0.12f),
             )
-        ).background(MaterialTheme.colorScheme.background.copy(alpha = 0.55f)),
+            drawCircle(
+                Brush.radialGradient(listOf(Sky.copy(alpha = 0.22f), Color.Transparent),
+                    center = Offset(size.width * (0.95f - 0.5f * d), size.height * 0.85f), radius = size.width * 0.8f),
+                radius = size.width * 0.8f, center = Offset(size.width * (0.95f - 0.5f * d), size.height * 0.85f),
+            )
+        },
     ) {
         Column(
             Modifier.fillMaxSize().systemBarsPadding().imePadding()
@@ -76,14 +101,14 @@ fun SplashScreen(onDone: (loggedIn: Boolean) -> Unit) {
         Graph.settingsLoaded.first { it }
         status = "Kiểm tra phiên đăng nhập…"
         val ok = runCatching { Graph.auth.restore() }.getOrDefault(false)
-        delay(500)
+        delay(250)
         onDone(ok)
     }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.alpha(a.value).scale(0.85f + 0.15f * a.value)) {
             LogoMark(96.dp)
             Spacer(Modifier.height(20.dp))
-            Text("TikTok Live Voice", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("Voice Live TikTok", fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Dim(status)
             Spacer(Modifier.height(24.dp))
@@ -128,23 +153,30 @@ fun LoginScreen(onLoggedIn: () -> Unit, onRegister: () -> Unit, onForgot: () -> 
             }
             Spacer(Modifier.height(16.dp))
         }
-        TlvField(id, { id = it }, "Tên đăng nhập hoặc email", leading = Icons.Filled.Person)
-        Spacer(Modifier.height(8.dp))
-        TlvField(pw, { pw = it }, "Mật khẩu", leading = Icons.Filled.Lock, password = true)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(keep, { keep = it })
-            Text("Ghi nhớ phiên đăng nhập", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            TextButton(onForgot) { Text("Quên mật khẩu?") }
+        GlassCard(Modifier.fillMaxWidth(), corner = 26.dp) {
+            TlvField(id, { id = it }, "Tên đăng nhập hoặc email", leading = Icons.Filled.Person)
+            Spacer(Modifier.height(8.dp))
+            TlvField(pw, { pw = it }, "Mật khẩu", leading = Icons.Filled.Lock, password = true)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(keep, { keep = it })
+                Text("Ghi nhớ phiên đăng nhập", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                TextButton(onForgot) { Text("Quên mật khẩu?") }
+            }
+            AnimatedVisibility(error != null) {
+                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp),
+                    textAlign = TextAlign.Center)
+            }
+            NeonButton("Đăng nhập", ::submit, Modifier.fillMaxWidth(), state = state, enabled = configured)
         }
-        AnimatedVisibility(error != null) {
-            Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp),
-                textAlign = TextAlign.Center)
-        }
-        NeonButton("Đăng nhập", ::submit, Modifier.fillMaxWidth(), state = state, enabled = configured)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Dim("Chưa có tài khoản?")
             TextButton(onRegister) { Text("Đăng ký", fontWeight = FontWeight.SemiBold) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
+            FloatingLogo(com.tlv.app.R.drawable.logo_tiktok, 38.dp, 0)
+            FloatingLogo(com.tlv.app.R.drawable.logo_discord, 38.dp, 2)
         }
     }
 }

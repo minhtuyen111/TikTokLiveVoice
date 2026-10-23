@@ -53,8 +53,7 @@ fun rememberStartLive(): (String) -> Unit {
             ch == null -> toast.error("Tên tài khoản hoặc đường dẫn LIVE không hợp lệ")
             s == null -> toast.error("Bạn chưa đăng nhập")
             !s.emailVerified -> toast.error("Hãy xác minh email trước khi dùng chức năng LIVE")
-            !Graph.currentSettings().bridgeUrl.startsWith("wss://") ->
-                toast.error("Chưa cấu hình địa chỉ cầu nối (wss://) trong trang Kết nối")
+            Graph.entitlement.value?.blocked == true -> toast.error("Đã hết thời gian dùng thử. Hãy mua gói để tiếp tục")
             else -> {
                 if (Build.VERSION.SDK_INT >= 33 &&
                     ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -74,9 +73,19 @@ private fun connLabel(c: ConnState): Pair<String, androidx.compose.ui.graphics.C
     ConnState.Ended -> "Livestream đã kết thúc" to TextDim
 }
 
+/** Đồng hồ phiên tách riêng: mỗi giây chỉ vẽ lại dòng chữ này, không vẽ lại cả trang chủ. */
+@Composable
+private fun SessionTimer(started: Long) {
+    val now by produceState(System.currentTimeMillis(), started) {
+        while (true) { value = System.currentTimeMillis(); delay(1000) }
+    }
+    Dim("Thời gian phiên: ${formatDuration(now - started)}")
+}
+
 @Composable
 fun HomeScreen(onConnect: () -> Unit, onComments: () -> Unit, onVoice: () -> Unit) {
     val e = Graph.engine
+    val ent by Graph.entitlement.collectAsState()
     val conn by e.conn.collectAsState()
     val stats by e.stats.collectAsState()
     val paused by e.paused.collectAsState()
@@ -89,9 +98,6 @@ fun HomeScreen(onConnect: () -> Unit, onComments: () -> Unit, onVoice: () -> Uni
     val startLive = rememberStartLive()
     val active = e.active
 
-    val now by produceState(System.currentTimeMillis(), active) {
-        while (active) { value = System.currentTimeMillis(); delay(1000) }
-    }
     val (label, color) = connLabel(conn)
 
     Column(
@@ -100,7 +106,15 @@ fun HomeScreen(onConnect: () -> Unit, onComments: () -> Unit, onVoice: () -> Uni
     ) {
         // Hero
         GlassCard(Modifier.fillMaxWidth()) {
-            Text("Xin chào, ${session?.username?.ifEmpty { "bạn" } ?: "bạn"} 👋", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Xin chào, ${session?.username?.ifEmpty { "bạn" } ?: "bạn"} 👋", Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                TierBadge(ent?.tier ?: "free")
+            }
+            ent?.let { x ->
+                Spacer(Modifier.height(4.dp))
+                Dim(if (x.dailyLimit > 0) "Hôm nay: ${x.usedToday} / ${x.dailyLimit} bình luận" else "Không giới hạn bình luận")
+            }
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LiveDot(conn == ConnState.Connected, color = Bad)
@@ -110,7 +124,7 @@ fun HomeScreen(onConnect: () -> Unit, onComments: () -> Unit, onVoice: () -> Uni
             AnimatedVisibility(active || channel.isNotEmpty()) {
                 Column(Modifier.padding(top = 6.dp)) {
                     Dim("Đang theo dõi: @${channel.ifEmpty { settings.lastChannel }}")
-                    if (active) Dim("Thời gian phiên: ${formatDuration(now - started)}")
+                    if (active) SessionTimer(started)
                 }
             }
         }
@@ -182,7 +196,6 @@ fun ConnectScreen() {
     val session by Graph.auth.session.collectAsState()
     val startLive = rememberStartLive()
     var input by remember { mutableStateOf(settings.lastChannel) }
-    var bridge by remember { mutableStateOf(settings.bridgeUrl) }
     val parsed = ChannelParser.parse(input)
     val (label, color) = connLabel(conn)
     val active = Graph.engine.active
@@ -213,12 +226,7 @@ fun ConnectScreen() {
             leading = Icons.Filled.AlternateEmail, enabled = !active,
             error = if (input.isNotBlank() && parsed == null) "Không nhận dạng được tài khoản" else null)
 
-        SectionTitle("Cầu nối bình luận")
-        TlvField(bridge, { bridge = it.trim(); Graph.update { copy(bridgeUrl = it.trim()) } },
-            "Địa chỉ cầu nối (wss://…)", leading = Icons.Filled.Hub, enabled = !active,
-            error = if (bridge.isNotEmpty() && !bridge.startsWith("wss://")) "Phải bắt đầu bằng wss://" else null)
-        Dim("TikTok không có API công khai để đọc bình luận LIVE. App nhận bình luận từ một máy chủ cầu nối do bạn tự triển khai " +
-            "(thư mục bridge/ trong repo, dùng thư viện mã nguồn mở tiktok-live-connector). App không hỏi hay lưu mật khẩu TikTok.")
+        Dim("Chỉ cần nhập tên kênh đang LIVE. Ứng dụng tự kết nối, không cần cài đặt thêm và không bao giờ hỏi mật khẩu TikTok.")
 
         if (!active) {
             NeonButton("Kết nối", { startLive(input) }, Modifier.fillMaxWidth(), icon = Icons.Filled.Link,

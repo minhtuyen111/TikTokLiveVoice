@@ -6,8 +6,13 @@ data class AppSettings(
     val ttsPitch: Float = 1.0f,
     val ttsLang: String = "vi-VN",
     val ttsVoice: String = "",
+    val ttsGender: String = "female", // "female" | "male": giọng nữ/nam của giọng online
+    val ttsCloud: Boolean = true, // dùng giọng online chất lượng cao (tự rơi về giọng hệ thống khi mất mạng)
     val readUsername: Boolean = true,
     val readEmoji: Boolean = false,
+    val readSymbols: Boolean = true, // đọc dấu câu và biểu tượng cảm xúc dạng chữ (. ! ? :))) < >)
+    val ttsVolume: Float = 1.0f,
+    val ttsAuto: Boolean = false, // tự nhận ngôn ngữ từng bình luận (Việt/Anh/Trung/Nhật/Hàn)
     // Bộ lọc
     val blockWords: List<String> = emptyList(),
     val priorityWords: List<String> = emptyList(),
@@ -16,11 +21,18 @@ data class AppSettings(
     val maxPerMinute: Int = 30,
     val queueMax: Int = 50,
     // Kết nối
-    val bridgeUrl: String = "",
+    val bridgeUrl: String = "", // bộ nhớ đệm địa chỉ máy chủ kết nối (tự lấy từ máy chủ, người dùng không nhập)
     val lastChannel: String = "",
+    // Âm thanh sự kiện: "off" | "random" | id âm thanh do admin cung cấp
+    val memeFollow: String = "random",
+    val memeShare: String = "random",
+    val memeGift: String = "random",
+    val announceEvents: Boolean = false,
     // Giao diện
     val darkTheme: Boolean = true,
-    val accent: Int = 0, // 0 tím, 1 xanh tím, 2 xanh dương
+    val accent: Int = 0, // 0 tím, 1 xanh tím, 2 xanh dương, 3 hồng, 4 xanh lá, 5 cam
+    val bgStyle: Int = 0, // 0 đêm, 1 đen AMOLED, 2 đại dương, 3 rừng, 4 hoàng hôn, 5 xám đá
+    val appLang: String = "vi",
     val reduceMotion: Boolean = false,
     // Thông báo
     val notifShowControls: Boolean = true,

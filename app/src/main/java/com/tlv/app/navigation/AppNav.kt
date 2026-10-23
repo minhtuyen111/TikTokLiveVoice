@@ -2,6 +2,10 @@ package com.tlv.app.navigation
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import com.tlv.app.ui.BounceIcon
+import com.tlv.app.ui.Text
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +31,7 @@ import kotlinx.coroutines.launch
 
 private val AUTH_ROUTES = setOf("splash", "login", "register", "forgot", "reset")
 private val PUBLIC_PAGES = setOf("terms", "privacy")
-private val SETTINGS_GROUP = setOf("settings", "filters", "appearance", "notifications", "security", "account")
+private val SETTINGS_GROUP = setOf("settings", "filters", "appearance", "notifications", "security", "account", "memes", "admin")
 
 private data class Dest(val route: String, val title: String, val icon: ImageVector)
 
@@ -36,6 +40,9 @@ private val DRAWER = listOf(
     Dest("connect", "Kết nối TikTok LIVE", Icons.Filled.Link),
     Dest("comments", "Bình luận trực tiếp", Icons.Filled.Forum),
     Dest("voice", "Giọng đọc", Icons.Filled.RecordVoiceOver),
+    Dest("memes", "Âm thanh meme", Icons.Filled.MusicNote),
+    Dest("plans", "Gói dịch vụ", Icons.Filled.WorkspacePremium),
+    Dest("wallet", "Ví & nạp tiền", Icons.Filled.AccountBalanceWallet),
     Dest("filters", "Bộ lọc bình luận", Icons.Filled.FilterAlt),
     Dest("history", "Lịch sử hoạt động", Icons.Filled.History),
     Dest("account", "Quản lý tài khoản", Icons.Filled.AccountCircle),
@@ -48,6 +55,8 @@ private val DRAWER = listOf(
     Dest("about", "Giới thiệu ứng dụng", Icons.Filled.Info),
 )
 
+private val ADMIN = Dest("admin", "Quản trị", Icons.Filled.AdminPanelSettings)
+
 private val BOTTOM = listOf(
     Dest("home", "Trang chủ", Icons.Filled.Home),
     Dest("comments", "Bình luận", Icons.Filled.Forum),
@@ -57,7 +66,8 @@ private val BOTTOM = listOf(
 
 private fun titleOf(route: String) = when (route) {
     "settings" -> "Cài đặt"
-    else -> DRAWER.firstOrNull { it.route == route }?.title ?: "TikTok Live Voice"
+    "admin" -> ADMIN.title
+    else -> DRAWER.firstOrNull { it.route == route }?.title ?: "Voice Live TikTok"
 }
 
 private fun NavHostController.goTop(route: String) = navigate(route) {
@@ -75,6 +85,7 @@ fun AppRoot() {
     val session by Graph.auth.session.collectAsState()
     val token by Graph.recoveryToken.collectAsState()
     val settings by Graph.settings.collectAsState()
+    val ent by Graph.entitlement.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val toaster = remember { Toaster(scope, SnackbarHostState()) }
@@ -83,6 +94,7 @@ fun AppRoot() {
     val chrome = session != null && route !in AUTH_ROUTES
     val publicPage = session == null && route in PUBLIC_PAGES
 
+    LaunchedEffect(session?.userId) { if (session != null) Graph.auth.refreshProfile() } // cập nhật vai trò từ máy chủ
     LaunchedEffect(token) { if (token != null) nav.navigate("reset") { launchSingleTop = true } }
     LaunchedEffect(session, route) {
         if (session == null && route !in AUTH_ROUTES && route !in PUBLIC_PAGES) {
@@ -107,10 +119,12 @@ fun AppRoot() {
                                 Text(session?.username?.ifEmpty { "Người dùng" } ?: "Người dùng", fontWeight = FontWeight.Bold)
                                 Text(session?.email.orEmpty(), style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(6.dp))
+                                TierBadge(ent?.tier ?: "free")
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        DRAWER.forEach { d ->
+                        (if (session?.isAdmin == true) DRAWER + ADMIN else DRAWER).forEach { d ->
                             NavigationDrawerItem(
                                 label = { Text(d.title) }, icon = { Icon(d.icon, null) },
                                 selected = route == d.route, onClick = { go(d.route) },
@@ -135,8 +149,12 @@ fun AppRoot() {
                     if (chrome || publicPage) CenterAlignedTopAppBar(
                         title = { Text(titleOf(route), fontWeight = FontWeight.SemiBold) },
                         navigationIcon = {
-                            if (chrome) IconButton({ scope.launch { drawer.open() } }) { Icon(Icons.Filled.Menu, "Mở menu") }
-                            else IconButton({ nav.popBackStack() }) { Icon(Icons.Filled.ArrowBack, "Quay lại") }
+                            // Trang gốc: nút menu. Trang con: nút quay lại (menu chuyển sang bên phải).
+                            if (chrome && BOTTOM.any { it.route == route }) AnimIconButton(Icons.Filled.Menu, "Mở menu", { scope.launch { drawer.open() } })
+                            else Box(Modifier.padding(start = 10.dp)) { BackButton({ if (!nav.popBackStack()) nav.goTop("home") }) }
+                        },
+                        actions = {
+                            if (chrome && BOTTOM.none { it.route == route }) AnimIconButton(Icons.Filled.Menu, "Mở menu", { scope.launch { drawer.open() } })
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                     )
@@ -145,17 +163,18 @@ fun AppRoot() {
                     if (chrome) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                         BOTTOM.forEach { b ->
                             val selected = route == b.route || (b.route == "settings" && route in SETTINGS_GROUP)
-                            NavigationBarItem(selected, { go(b.route) }, { Icon(b.icon, b.title) }, label = { Text(b.title) })
+                            NavigationBarItem(selected, { go(b.route) }, { BounceIcon(b.icon, b.title, selected) }, label = { Text(b.title) })
                         }
                     }
                 },
             ) { pad ->
                 NavHost(
                     nav, startDestination = "splash", modifier = Modifier.padding(pad),
-                    enterTransition = { if (slow) fadeIn(tween(1)) else fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 12 } },
-                    exitTransition = { if (slow) fadeOut(tween(1)) else fadeOut(tween(160)) },
-                    popEnterTransition = { if (slow) fadeIn(tween(1)) else fadeIn(tween(220)) + slideInHorizontally(tween(260)) { -it / 12 } },
-                    popExitTransition = { if (slow) fadeOut(tween(1)) else fadeOut(tween(160)) + slideOutHorizontally(tween(220)) { it / 12 } },
+                    // Chuyển cảnh nhẹ: mờ dần + phóng rất nhẹ (chỉ đổi alpha/scale trong lớp đồ họa, không đo lại bố cục).
+                    enterTransition = { if (slow) fadeIn(tween(1)) else fadeIn(tween(200, 60, FastOutSlowInEasing)) + scaleIn(tween(240, 40, FastOutSlowInEasing), 0.97f) },
+                    exitTransition = { if (slow) fadeOut(tween(1)) else fadeOut(tween(110, easing = FastOutLinearInEasing)) },
+                    popEnterTransition = { if (slow) fadeIn(tween(1)) else fadeIn(tween(200, 60, FastOutSlowInEasing)) + scaleIn(tween(240, 40, FastOutSlowInEasing), 0.97f) },
+                    popExitTransition = { if (slow) fadeOut(tween(1)) else fadeOut(tween(110, easing = FastOutLinearInEasing)) + scaleOut(tween(160), 0.98f) },
                 ) {
                     composable("splash") {
                         SplashScreen { ok ->
@@ -170,9 +189,17 @@ fun AppRoot() {
                         )
                     }
                     composable("register") {
-                        RegisterScreen({ nav.popBackStack() }, { nav.navigate("terms") }, { nav.navigate("privacy") })
+                        Box(Modifier.fillMaxSize()) {
+                            RegisterScreen({ nav.popBackStack() }, { nav.navigate("terms") }, { nav.navigate("privacy") })
+                            BackButton({ nav.popBackStack() }, Modifier.align(Alignment.TopStart).systemBarsPadding().padding(14.dp))
+                        }
                     }
-                    composable("forgot") { ForgotScreen { nav.popBackStack() } }
+                    composable("forgot") {
+                        Box(Modifier.fillMaxSize()) {
+                            ForgotScreen { nav.popBackStack() }
+                            BackButton({ nav.popBackStack() }, Modifier.align(Alignment.TopStart).systemBarsPadding().padding(14.dp))
+                        }
+                    }
                     composable("reset") {
                         val t = token
                         if (t == null) LaunchedEffect(Unit) { nav.navigate("login") { popUpTo(0) } }
@@ -183,6 +210,10 @@ fun AppRoot() {
                     composable("connect") { ConnectScreen() }
                     composable("comments") { CommentsScreen() }
                     composable("voice") { VoiceScreen() }
+                    composable("memes") { MemeScreen() }
+                    composable("plans") { PlansScreen(onTopUp = { nav.navigate("wallet") { launchSingleTop = true } }) }
+                    composable("wallet") { WalletScreen() }
+                    composable("admin") { AdminScreen() }
                     composable("filters") { FilterScreen() }
                     composable("history") { HistoryScreen() }
                     composable("account") { AccountScreen({ confirmLogout = true }, { nav.navigate("security") }) }

@@ -31,7 +31,11 @@ object CommentFilter {
      */
     fun decide(s: AppSettings, rawText: String, recent: Collection<String>): Decision {
         val shown = clean(rawText, keepEmoji = true)
-        val spoken = clean(rawText, keepEmoji = s.readEmoji)
+        var spoken = clean(rawText, keepEmoji = s.readEmoji)
+        if (s.readSymbols) {
+            val lang = if (s.ttsAuto) com.tlv.app.tts.LangDetect.detect(spoken, s.ttsLang) else s.ttsLang
+            spoken = SpeechText.convert(spoken, lang)
+        }
         if (shown.isEmpty() || spoken.none { it.isLetterOrDigit() }) return Decision(false, reason = Reason.EMPTY)
         if (shown.length > s.maxLength) return Decision(false, reason = Reason.TOO_LONG)
         val low = shown.lowercase()

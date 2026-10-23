@@ -1,6 +1,7 @@
 package com.tlv.app.auth
 
 import com.tlv.app.BuildConfig
+import com.tlv.app.security.Obf
 import com.tlv.app.network.Http
 import com.tlv.app.network.await
 import com.tlv.app.security.Session
@@ -10,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
@@ -23,19 +25,20 @@ sealed class AuthResult {
  * Chỉ dùng anon key (công khai). Mọi quyền truy cập được kiểm soát bởi RLS ở backend.
  */
 class AuthRepo(private val store: SessionStore) {
-    private val base get() = BuildConfig.SUPABASE_URL.trimEnd('/')
+    internal val base: String by lazy { Obf.dec(BuildConfig.SB_U).trimEnd('/') }
+    private val anon: String by lazy { Obf.dec(BuildConfig.SB_K) }
     private val json = "application/json".toMediaType()
 
     private val _session = MutableStateFlow<Session?>(null)
     val session: StateFlow<Session?> = _session
 
     val configured get() = base.startsWith("https://") && !base.contains("YOUR-PROJECT") &&
-        BuildConfig.SUPABASE_ANON_KEY.length > 20 && !BuildConfig.SUPABASE_ANON_KEY.startsWith("YOUR_")
+        anon.length > 20 && !anon.startsWith("YOUR_")
 
-    private fun req(path: String, token: String? = null) =
+    internal fun req(path: String, token: String? = null) =
         Request.Builder().url("$base$path")
-            .header("apikey", BuildConfig.SUPABASE_ANON_KEY)
-            .header("Authorization", "Bearer ${token ?: BuildConfig.SUPABASE_ANON_KEY}")
+            .header("apikey", anon)
+            .header("Authorization", "Bearer ${token ?: anon}")
 
     private fun body(vararg p: Pair<String, Any?>) =
         JSONObject().also { o -> p.forEach { (k, v) -> o.put(k, v ?: JSONObject.NULL) } }
@@ -60,7 +63,7 @@ class AuthRepo(private val store: SessionStore) {
     private suspend inline fun <T> net(block: () -> T, onErr: (String) -> T): T =
         try { block() } catch (e: IOException) { onErr("Lỗi mạng, kiểm tra kết nối") }
 
-    private fun parseSession(text: String, usernameFallback: String = ""): Session? = runCatching {
+    private fun parseSession(text: String, usernameFallback: String = "", role: String = "user"): Session? = runCatching {
         val o = JSONObject(text)
         val u = o.getJSONObject("user")
         val meta = u.optJSONObject("user_metadata")
@@ -72,8 +75,19 @@ class AuthRepo(private val store: SessionStore) {
             email = u.optString("email"),
             username = meta?.optString("username").orEmpty().ifEmpty { usernameFallback },
             emailVerified = !u.isNull("email_confirmed_at") && u.optString("email_confirmed_at").isNotEmpty(),
+            role = role,
         )
     }.getOrNull()
+
+    /** Vai trò do máy chủ quyết định (bảng profiles, RLS chỉ cho đọc hồ sơ của chính mình). */
+    private suspend fun fetchRole(uid: String, token: String, fallback: String): String = runCatching {
+        val r = Http.client.newCall(req("/rest/v1/profiles?select=role,status&id=eq.$uid", token).get().build()).await()
+        if (r.ok) {
+            val o = JSONArray(r.body).optJSONObject(0)
+            if (o?.optString("status") == "locked") "locked"
+            else o?.optString("role")?.takeIf { it == "admin" || it == "user" } ?: fallback
+        } else fallback
+    }.getOrDefault(fallback)
 
     /** Khôi phục phiên đã lưu lúc khởi động. Trả về true nếu còn hợp lệ. */
     suspend fun restore(): Boolean {
@@ -91,7 +105,7 @@ class AuthRepo(private val store: SessionStore) {
                     .post(body("refresh_token" to s.refreshToken)).build()
             ).await()
             if (r.ok) {
-                val n = parseSession(r.body, s.username)
+                val n = parseSession(r.body, s.username, s.role)
                 if (n != null) { store.save(n, store.remembered()); _session.value = n; true } else false
             } else if (r.code == 400 || r.code == 401) { localLogout(); false }
             else true // lỗi tạm thời: giữ phiên, thử lại sau
@@ -106,6 +120,11 @@ class AuthRepo(private val store: SessionStore) {
     }
 
     suspend fun signUp(username: String, email: String, password: String): AuthResult = net({
+        // Kiểm tra trùng tên trước (RPC công khai chỉ trả true/false)
+        val avail = Http.client.newCall(
+            req("/rest/v1/rpc/username_available").post(body("p_username" to username)).build()
+        ).await()
+        if (avail.ok && avail.body.trim() == "false") return@net AuthResult.Fail("Tên đăng nhập đã được sử dụng")
         val r = Http.client.newCall(
             req("/auth/v1/signup").post(
                 body("email" to email.trim(), "password" to password,
@@ -130,7 +149,10 @@ class AuthRepo(private val store: SessionStore) {
             req("/auth/v1/token?grant_type=password").post(body("email" to email, "password" to password)).build()
         ).await()
         if (!r.ok) return@net AuthResult.Fail(err(r.code, r.body))
-        val s = parseSession(r.body, identifier) ?: return@net AuthResult.Fail("Phản hồi không hợp lệ")
+        val s0 = parseSession(r.body, identifier) ?: return@net AuthResult.Fail("Phản hồi không hợp lệ")
+        val role0 = fetchRole(s0.userId, s0.accessToken, "user")
+        if (role0 == "locked") return@net AuthResult.Fail("Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên")
+        val s = s0.copy(role = role0)
         store.save(s, remember); _session.value = s
         AuthResult.Ok()
     }, { AuthResult.Fail(it) })
@@ -180,7 +202,11 @@ class AuthRepo(private val store: SessionStore) {
             val r = Http.client.newCall(req("/auth/v1/user", t).get().build()).await()
             if (r.ok) {
                 val u = JSONObject(r.body)
-                val n = s.copy(emailVerified = !u.isNull("email_confirmed_at") && u.optString("email_confirmed_at").isNotEmpty())
+                val n = s.copy(
+                    emailVerified = !u.isNull("email_confirmed_at") && u.optString("email_confirmed_at").isNotEmpty(),
+                    role = fetchRole(s.userId, t, s.role),
+                )
+                if (n.role == "locked") { signOut(false); return@net null }
                 store.save(n, store.remembered()); _session.value = n; n
             } else s
         }, { s })

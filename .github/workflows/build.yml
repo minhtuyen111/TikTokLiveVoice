@@ -12,6 +12,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      APK_SIG_SHA256: ${{ vars.APK_SIG_SHA256 }}
+      # versionCode tăng theo mỗi lần build để cài đè được bản cũ (= số lần chạy workflow)
+      VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,18 +33,36 @@ jobs:
 
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --no-daemon
-        env:
-          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+      # Khóa ký: dùng secret KEYSTORE_B64 (khuyến nghị, để cập nhật đè lên bản cũ được).
+      # Không có secret thì tự sinh khóa tạm: APK vẫn cài được nhưng mỗi lần build là một chữ ký mới.
+      - name: Prepare signing key
         env:
-          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD_S: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS_S: ${{ secrets.KEY_ALIAS }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD_S" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=$KEY_ALIAS_S" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$KEYSTORE_PASSWORD_S" >> "$GITHUB_ENV"
+          else
+            PW="$(openssl rand -hex 12)"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" -storepass "$PW" -keypass "$PW" \
+              -alias voicelive -keyalg RSA -keysize 2048 -validity 9125 -dname "CN=Voice Live TikTok"
+            echo "KEYSTORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=voicelive" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$PW" >> "$GITHUB_ENV"
+          fi
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      # Bản release (R8 thu nhỏ + làm rối) chạy mượt hơn hẳn bản debug.
+      - name: Build release APK
+        run: gradle :app:assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TikTokLiveVoice-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: voicelive-apk
+          path: app/build/outputs/apk/release/voicelive-release.apk
           retention-days: 14

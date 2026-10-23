@@ -4,6 +4,7 @@ import com.tlv.app.filter.CommentFilter
 import com.tlv.app.history.SessionDao
 import com.tlv.app.history.SessionEntity
 import com.tlv.app.settings.AppSettings
+import com.tlv.app.tts.LangDetect
 import com.tlv.app.tts.TtsController
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -22,6 +23,8 @@ class LiveEngine(
     private val settings: () -> AppSettings,
     private val ownerId: () -> String,
     private val token: suspend () -> String?,
+    private val bridge: suspend () -> String,
+    private val eventSound: (kind: String) -> Unit,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var connectJob: Job? = null
@@ -106,7 +109,7 @@ class LiveEngine(
         tts.ensureInit()
         withTimeoutOrNull(4000) { tts.ready.first { it } } ?: return "Engine đọc chưa sẵn sàng"
         tts.apply(settings())?.let { return it }
-        return if (tts.speak(text)) null else "Không đọc được"
+        return if (tts.speak(text, settings().ttsVolume)) null else "Không đọc được"
     }
 
     private fun resetCounters() {
@@ -172,6 +175,25 @@ class LiveEngine(
         wake.trySend(Unit)
     }
 
+    private fun onEvent(kind: String, user: String, name: String, count: Int) {
+        eventSound(kind)
+        val s = settings()
+        if (!s.announceEvents) return
+        val who = user.ifBlank { "Một người xem" }
+        val line = when (kind) {
+            "follow" -> "$who đã theo dõi"
+            "share" -> "$who đã chia sẻ"
+            else -> "$who đã tặng ${if (count > 1) "$count " else ""}${name.ifBlank { "quà" }}"
+        }
+        synchronized(lock) {
+            if (queue.size >= s.queueMax) return
+            val id = nextId++
+            put(Comment(id, user, line, System.currentTimeMillis(), CommentStatus.PENDING, "event"))
+            queue.addLast(id); publishStats()
+        }
+        wake.trySend(Unit)
+    }
+
     private suspend fun connectLoop(ch: String) {
         val owner = ownerId()
         val rowId = withContext(NonCancellable) {
@@ -186,9 +208,9 @@ class LiveEngine(
                 _conn.value = if (attempt == 0) ConnState.Connecting else _conn.value
                 val connectedAt = LongArray(1)
                 val outcome = source.run(
-                    bridge = settings().bridgeUrl, channel = ch, token = token(),
+                    bridge = bridge(), channel = ch, token = token(),
                     onConnected = { connectedAt[0] = System.currentTimeMillis(); _conn.value = ConnState.Connected },
-                    onComment = ::onComment,
+                    onComment = ::onComment, onEvent = ::onEvent,
                 )
                 when (outcome) {
                     is Outcome.Ended -> { last = "Livestream đã kết thúc"; _conn.value = ConnState.Ended; return }
@@ -232,7 +254,6 @@ class LiveEngine(
             if (c == null) { _current.value = null; publishStatsLocked(); wake.receive(); continue }
 
             val s = settings()
-            tts.apply(s)
             // Giới hạn số bình luận đọc mỗi phút
             val now = System.currentTimeMillis()
             while (spokenTimes.isNotEmpty() && now - spokenTimes.first() > 60_000) spokenTimes.removeFirst()
@@ -243,8 +264,11 @@ class LiveEngine(
             }
             synchronized(lock) { put(c.copy(status = CommentStatus.SPEAKING)); publishStats() }
             _current.value = c
-            val line = if (s.readUsername && c.user.isNotBlank()) "${c.user} nói ${c.text}" else c.text
-            val ok = tts.speak(line)
+            val line = if (c.filterNote == "event") c.text
+                else if (s.readUsername && c.user.isNotBlank()) "${c.user} nói ${c.text}" else c.text
+            val lang = if (s.ttsAuto) LangDetect.detect(c.text, s.ttsLang) else s.ttsLang
+            tts.applyLang(s, lang, if (lang == s.ttsLang) s.ttsVoice else "")
+            val ok = tts.speak(line, s.ttsVolume)
             spokenTimes.addLast(System.currentTimeMillis())
             synchronized(lock) {
                 if (ok) spoken++

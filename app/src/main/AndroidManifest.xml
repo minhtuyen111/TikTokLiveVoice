@@ -6,10 +6,32 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <queries>
+        <package android:name="com.chelpus.lackypatch" />
+        <package android:name="com.dimonvideo.luckypatcher" />
+        <package android:name="com.forpda.lp" />
+        <package android:name="uret.jasi2169.patcher" />
+        <package android:name="com.android.vending.billing.InAppBillingService.LUCK" />
+        <package android:name="com.android.vending.billing.InAppBillingService.LOCK" />
+        <package android:name="com.android.vending.billing.InAppBillingService.CLON" />
+        <package android:name="com.android.vending.billing.InAppBillingService.COIN" />
+        <package android:name="cc.madkite.freedom" />
+        <package android:name="com.blackmartalpha" />
+        <package android:name="org.sbtools.gamehack" />
+        <package android:name="com.zune.gamekiller" />
+        <package android:name="com.cih.game_cih" />
+        <package android:name="com.xmodgame" />
+        <package android:name="org.creeplays.hack" />
+    </queries>
 
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -36,6 +58,7 @@
         <service
             android:name=".service.LiveService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

@@ -12,7 +12,10 @@ data class Session(
     val email: String,
     val username: String,
     val emailVerified: Boolean,
-)
+    val role: String = "user",
+) {
+    val isAdmin get() = role == "admin"
+}
 
 /** Lưu phiên đăng nhập, mã hóa bằng khóa trong Android Keystore. Không ghi log. */
 class SessionStore(context: Context) {
@@ -33,7 +36,7 @@ class SessionStore(context: Context) {
                 .putString("at", s.accessToken).putString("rt", s.refreshToken)
                 .putLong("exp", s.expiresAtMs).putString("uid", s.userId)
                 .putString("email", s.email).putString("user", s.username)
-                .putBoolean("ver", s.emailVerified).putBoolean("remember", true)
+                .putBoolean("ver", s.emailVerified).putString("role", s.role).putBoolean("remember", true)
                 .apply()
         } else {
             prefs.edit().clear().apply()
@@ -48,7 +51,7 @@ class SessionStore(context: Context) {
         return Session(
             at, rt, prefs.getLong("exp", 0), prefs.getString("uid", "") ?: "",
             prefs.getString("email", "") ?: "", prefs.getString("user", "") ?: "",
-            prefs.getBoolean("ver", false),
+            prefs.getBoolean("ver", false), prefs.getString("role", "user") ?: "user",
         )
     }
 

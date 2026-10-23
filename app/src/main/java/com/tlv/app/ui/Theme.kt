@@ -23,21 +23,37 @@ val Ok = Color(0xFF34D399)
 val Warn = Color(0xFFFBBF24)
 val Bad = Color(0xFFF87171)
 
-private val accents = listOf(Neon, Indigo, Sky)
+val ACCENTS = listOf(Neon, Indigo, Sky, Color(0xFFF472B6), Color(0xFF34D399), Color(0xFFFB923C))
+private val accents = ACCENTS
+
+/** Bộ màu nền tối: nền, bề mặt, bề mặt nổi. */
+class BgPalette(val bg: Color, val surface: Color, val surfaceHi: Color)
+val BG_PALETTES = listOf(
+    BgPalette(Color(0xFF0B0F1A), Color(0xFF141A2B), Color(0xFF1B2340)), // đêm
+    BgPalette(Color(0xFF000000), Color(0xFF0C0C10), Color(0xFF16161D)), // AMOLED
+    BgPalette(Color(0xFF06141F), Color(0xFF0C2233), Color(0xFF123249)), // đại dương
+    BgPalette(Color(0xFF07140E), Color(0xFF0D2418), Color(0xFF14352A)), // rừng
+    BgPalette(Color(0xFF160A16), Color(0xFF261224), Color(0xFF3A1B36)), // hoàng hôn
+    BgPalette(Color(0xFF111316), Color(0xFF1B1E23), Color(0xFF272B32)), // xám đá
+)
 
 class Motion(val reduce: Boolean)
 val LocalMotion = staticCompositionLocalOf { Motion(false) }
 
 @Composable
-fun TlvTheme(dark: Boolean = true, accent: Int = 0, reduceMotion: Boolean = false, content: @Composable () -> Unit) {
+fun TlvTheme(
+    dark: Boolean = true, accent: Int = 0, reduceMotion: Boolean = false, bgStyle: Int = 0, lang: String = "vi",
+    content: @Composable () -> Unit,
+) {
     val a = accents.getOrElse(accent) { Neon }
+    val p = BG_PALETTES.getOrElse(bgStyle) { BG_PALETTES[0] }
     val scheme = if (dark) darkColorScheme(
         primary = a, onPrimary = Color.White,
         secondary = Sky, tertiary = Indigo,
-        background = BgDark, onBackground = Color.White,
-        surface = SurfaceDark, onSurface = Color.White,
-        surfaceVariant = SurfaceHiDark, onSurfaceVariant = TextDim,
-        surfaceContainer = SurfaceDark, surfaceContainerHigh = SurfaceHiDark,
+        background = p.bg, onBackground = Color.White,
+        surface = p.surface, onSurface = Color.White,
+        surfaceVariant = p.surfaceHi, onSurfaceVariant = TextDim,
+        surfaceContainer = p.surface, surfaceContainerHigh = p.surfaceHi,
         outline = Color(0xFF3A4366), outlineVariant = Color(0x22FFFFFF),
         error = Bad,
     ) else lightColorScheme(
@@ -48,7 +64,7 @@ fun TlvTheme(dark: Boolean = true, accent: Int = 0, reduceMotion: Boolean = fals
         surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFEDEFFA),
         outlineVariant = Color(0x22000000), error = Color(0xFFDC2626),
     )
-    CompositionLocalProvider(LocalMotion provides Motion(reduceMotion)) {
+    CompositionLocalProvider(LocalMotion provides Motion(reduceMotion), LocalLang provides lang) {
         MaterialTheme(
             colorScheme = scheme,
             shapes = Shapes(
