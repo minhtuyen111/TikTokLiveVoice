@@ -47,8 +47,9 @@ internal class OfflineVietnameseTts(context: Context) {
         private const val DATA_VERSION = "vais1000-r2"
         private const val PREFS = "tlv_tts_guard"
         private const val MIN_MODEL_BYTES = 1_000_000L
-        private const val CLARITY_SPEED = 0.93f // đọc chậm hơn ~7% cho rõ chữ
-        private const val PRESENCE = 0.35f      // độ nhấn dải cao
+        private const val CLARITY_SPEED = 0.95f // đọc chậm hơn ~5% cho rõ chữ
+        private const val BASE_PITCH = 0.88f    // hạ tông mặc định (giọng gốc khá cao); thanh "Cao độ" trong app nhân thêm vào
+        private const val SMOOTH = 0.6f         // làm mềm dải cao chói (1 = không lọc)
         private const val TARGET_PEAK = 0.92f   // chuẩn hóa đỉnh âm lượng
 
         @Volatile private var bundledCache: Boolean? = null
@@ -135,8 +136,8 @@ internal class OfflineVietnameseTts(context: Context) {
             tokens = File(root, "tokens.txt").absolutePath,
             dataDir = File(root, "espeak-ng-data").absolutePath, // PHẢI là đường dẫn thật, không phải đường dẫn assets
             // Giảm nhiễu ngẫu nhiên của VITS: giọng sạch, ít rè, phát âm rõ chữ hơn (mặc định Piper 0.667 / 0.8).
-            noiseScale = 0.35f,
-            noiseScaleW = 0.5f,
+            noiseScale = 0.45f,
+            noiseScaleW = 0.6f,
             lengthScale = 1.0f,
         )
         val cfg = OfflineTtsConfig(
@@ -170,15 +171,17 @@ internal class OfflineVietnameseTts(context: Context) {
 
     // ───────────── đọc ─────────────
 
-    suspend fun speak(text: String, volume: Float, rate: Float): Boolean = withContext(Dispatchers.Default) {
+    suspend fun speak(text: String, volume: Float, rate: Float, pitch: Float = 1f): Boolean = withContext(Dispatchers.Default) {
         val clean = text.trim().take(400)
+        val factor = (BASE_PITCH * pitch).coerceIn(0.7f, 1.2f)
         if (clean.isEmpty()) return@withContext true
         lock.withLock {
             stopped.set(false)
             try {
-                val generated = getEngine().generate(clean, sid = 0, speed = (rate * CLARITY_SPEED).coerceIn(0.6f, 1.8f))
+                val generated = getEngine().generate(clean, sid = 0, speed = (rate * CLARITY_SPEED / factor).coerceIn(0.6f, 2.0f))
                 val samples = clarify(generated.samples)
-                val sr = generated.sampleRate
+                // Phát ở tần số lấy mẫu thấp hơn = hạ tông (giọng trầm, đỡ the thé); đã bù tốc độ ở trên để nhịp đọc không đổi.
+                val sr = (generated.sampleRate * factor).toInt()
                 if (samples.isEmpty() || sr <= 0) return@withLock false
                 if (stopped.get()) return@withLock false
 
@@ -239,19 +242,19 @@ internal class OfflineVietnameseTts(context: Context) {
         }
     }
 
-    /** Làm rõ tiếng: bỏ lệch DC, nhấn nhẹ dải cao (phụ âm s, x, t, ch dễ nghe hơn), rồi chuẩn hóa âm lượng. */
+    /** Bỏ lệch DC, làm mềm dải cao chói, rồi chuẩn hóa âm lượng. */
     private fun clarify(src: FloatArray): FloatArray {
         if (src.isEmpty()) return src
         var mean = 0f
         for (v in src) mean += v
         mean /= src.size
         val out = FloatArray(src.size)
-        var prev = 0f
+        var lp = 0f
         var peak = 0.0001f
         for (i in src.indices) {
             val x = src[i] - mean
-            val y = x + PRESENCE * (x - prev) // pre-emphasis nhẹ
-            prev = x
+            lp += SMOOTH * (x - lp) // lọc thông thấp nhẹ: bớt tiếng "chát", sắc gắt ở phụ âm s/x/ch
+            val y = lp
             out[i] = y
             val a = if (y < 0) -y else y
             if (a > peak) peak = a

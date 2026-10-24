@@ -187,7 +187,7 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
         }
         _speaking.value = true
         val r = try {
-            engine.speak(text, volume, curRate)
+            engine.speak(text, volume, curRate, curPitch)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
