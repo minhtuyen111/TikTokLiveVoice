@@ -106,6 +106,9 @@ create table if not exists public.meme_sounds (
   created_by uuid default auth.uid() references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
+-- Cho phép thêm loại 'idle' (âm thanh đợi, phát khi hết hàng chờ). Chạy lại an toàn.
+alter table public.meme_sounds drop constraint if exists meme_sounds_event_check;
+alter table public.meme_sounds add constraint meme_sounds_event_check check (event in ('follow','share','gift','idle'));
 alter table public.meme_sounds enable row level security;
 drop policy if exists "meme_read" on public.meme_sounds;
 create policy "meme_read" on public.meme_sounds for select to authenticated using (true);

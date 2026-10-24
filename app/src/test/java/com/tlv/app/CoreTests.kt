@@ -13,6 +13,15 @@ import org.junit.Test
 class CoreTests {
     private val s = AppSettings()
 
+    @Test fun eventLines() {
+        assertEquals("Lan đã theo dõi", com.tlv.app.filter.EventText.line("vi-VN", "follow", "Lan", "", 1))
+        assertEquals("Một người xem đã chia sẻ", com.tlv.app.filter.EventText.line("vi-VN", "share", "", "", 1))
+        assertEquals("Nam đã tặng 3 hoa hồng", com.tlv.app.filter.EventText.line("vi-VN", "gift", "Nam", "Rose", 3))
+        assertEquals("Nam sent a gift", com.tlv.app.filter.EventText.line("en-US", "gift", "Nam", "", 1))
+        assertEquals("nguyen van a", com.tlv.app.filter.EventText.cleanName("nguyen_van.a 😀"))
+        assertEquals("", com.tlv.app.filter.EventText.cleanName("😀😀"))
+    }
+
     @Test fun usernameRules() {
         assertNull(Validators.username("viet_123"))
         assertNotNull(Validators.username("ab"))

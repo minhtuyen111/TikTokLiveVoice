@@ -9,22 +9,35 @@ import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
 
-/** Phát âm thanh meme: tải một lần, lưu cache, phát bằng MediaPlayer (nhẹ, không giữ CPU khi rảnh). */
+/** Phát âm thanh meme: tải một lần, lưu cache, phát bằng MediaPlayer. Có bản "phát rồi chờ xong" để xếp hàng tuần tự. */
 class MemePlayer(private val ctx: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var player: MediaPlayer? = null
-    @Volatile private var lastAt = 0L
+    @Volatile private var player: MediaPlayer? = null
     private val dir get() = File(ctx.cacheDir, "memes").also { it.mkdirs() }
 
-    /** Bỏ qua nếu vừa phát trong 2,5 giây để không chồng tiếng khi sự kiện dồn dập. */
-    fun play(url: String, force: Boolean = false) {
-        val now = System.currentTimeMillis()
-        if (!force && now - lastAt < 2500) return
-        lastAt = now
+    /** Nghe thử (không chờ). */
+    fun play(url: String, @Suppress("UNUSED_PARAMETER") force: Boolean = false) {
         scope.launch {
             val f = cached(url) ?: return@launch
-            withContext(Dispatchers.Main) { start(f) }
+            withContext(Dispatchers.Main) { start(f, null) }
         }
+    }
+
+    /** Phát và chờ đến khi xong (hoặc hết [maxMs]). Bị hủy giữa chừng thì tự tắt tiếng. true = phát xong bình thường. */
+    suspend fun playAndWait(url: String, maxMs: Long = 6000L): Boolean {
+        val f = withContext(Dispatchers.IO) { cached(url) } ?: return false
+        val done = CompletableDeferred<Boolean>()
+        withContext(Dispatchers.Main) { start(f, done) }
+        try {
+            return withTimeoutOrNull(maxMs) { done.await() } ?: false
+        } finally {
+            if (!done.isCompleted) withContext(NonCancellable + Dispatchers.Main) { stop() }
+        }
+    }
+
+    /** Tải trước để lúc cần phát không bị trễ (và dùng được cả khi mất mạng). */
+    fun prefetch(urls: List<String>) {
+        scope.launch { urls.forEach { runCatching { cached(it) } } }
     }
 
     private fun cached(url: String): File? {
@@ -43,20 +56,25 @@ class MemePlayer(private val ctx: Context) {
         }.getOrNull()
     }
 
-    private fun start(f: File) {
+    private fun start(f: File, done: CompletableDeferred<Boolean>?) {
         stop()
-        player = MediaPlayer().apply {
-            setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-            setOnPreparedListener { it.start() }
-            setOnCompletionListener { stop() }
-            setOnErrorListener { _, _, _ -> stop(); true }
-            runCatching { setDataSource(f.absolutePath); prepareAsync() }.onFailure { stop() }
-        }
+        val mp = MediaPlayer()
+        player = mp
+        mp.setAudioAttributes(
+            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
+        )
+        mp.setOnPreparedListener { it.start() }
+        mp.setOnCompletionListener { release(mp); done?.complete(true) }
+        mp.setOnErrorListener { _, _, _ -> release(mp); done?.complete(false); true }
+        runCatching { mp.setDataSource(f.absolutePath); mp.prepareAsync() }.onFailure { release(mp); done?.complete(false) }
+    }
+
+    private fun release(mp: MediaPlayer) {
+        runCatching { mp.release() }
+        if (player === mp) player = null
     }
 
     fun stop() {
-        player?.let { runCatching { it.release() } }
-        player = null
+        player?.let { release(it) }
     }
 }

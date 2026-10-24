@@ -42,13 +42,18 @@ fun MemeScreen() {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         MEME_EVENTS.forEach { (ev, label) ->
             val pool = list.filter { it.event == ev }
-            val sel = when (ev) { "follow" -> s.memeFollow; "share" -> s.memeShare; else -> s.memeGift }
+            val sel = when (ev) { "follow" -> s.memeFollow; "share" -> s.memeShare; "gift" -> s.memeGift; else -> s.memeIdle }
             SectionTitle(label)
             val options = listOf("off" to "Tắt", "random" to "Ngẫu nhiên") + pool.map { it.id to it.title }
             Dropdown("Tiếng khi $label", options.firstOrNull { it.first == sel }?.second ?: "Ngẫu nhiên", options) { v ->
                 Graph.update {
-                    when (ev) { "follow" -> copy(memeFollow = v); "share" -> copy(memeShare = v); else -> copy(memeGift = v) }
+                    when (ev) { "follow" -> copy(memeFollow = v); "share" -> copy(memeShare = v); "gift" -> copy(memeGift = v); else -> copy(memeIdle = v) }
                 }
+            }
+            if (ev == "idle") {
+                Dim("Khi đọc hết hàng chờ, app phát âm này và lặp lại cho tới khi có người mới.")
+                val gaps = listOf("8", "15", "30", "60").map { it to "$it giây" }
+                Dropdown("Lặp lại sau", "${s.memeIdleGap} giây", gaps) { v -> Graph.update { copy(memeIdleGap = v.toInt()) } }
             }
             if (pool.isEmpty() && !loading) Dim("Quản trị viên chưa thêm âm thanh cho sự kiện này.")
             else if (sel != "off") {
@@ -58,7 +63,7 @@ fun MemeScreen() {
             }
         }
         SectionTitle("Thông báo bằng giọng nói")
-        SwitchRow("Đọc tên người tương tác", "Đọc \"tên đã theo dõi / chia sẻ / tặng quà\" bằng giọng đọc", s.announceEvents) { v ->
+        SwitchRow("Đọc tên người tương tác", "Đọc \"tên đã theo dõi / chia sẻ / tặng quà\" lần lượt theo hàng chờ, sau tiếng meme", s.announceEvents) { v ->
             Graph.update { copy(announceEvents = v) }
         }
     }

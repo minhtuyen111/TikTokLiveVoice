@@ -9,6 +9,9 @@ import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import com.tlv.app.settings.AppSettings
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -35,6 +38,8 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
     @Volatile private var cloudDownUntil = 0L
     private var player: MediaPlayer? = null
     @Volatile private var offlineVi: OfflineVietnameseTts? = null
+    @Volatile private var viFirst = true // tiếng Việt ưu tiên giọng tích hợp trong app (chạy mọi ROM, không cần mạng)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val cloudOn get() = cloud?.available == true && useCloud
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     @Volatile private var appliedKey: String? = null
@@ -58,24 +63,45 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
 
     @Synchronized
     fun ensureInit() {
-        // Giọng online không cần engine hệ thống: sẵn sàng ngay.
-        if (cloud?.available == true) _ready.value = true
+        // Giọng online hoặc giọng Việt tích hợp không cần engine hệ thống: sẵn sàng ngay.
+        if (cloud?.available == true || offlineUsable()) _ready.value = true
+        if (offlineUsable()) warmUpOffline()
         if (tts != null) return
         _error.value = null
         sysFailed = false
-        val t = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                sysReady = true
-                _ready.value = true
-            } else {
-                sysFailed = true
-                if (!cloudOn) _error.value = "Không khởi tạo được engine đọc giọng nói"
-                tts = null
+        val t = try {
+            TextToSpeech(context.applicationContext) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    sysReady = true
+                    _ready.value = true
+                } else {
+                    sysFailed = true
+                    if (!cloudOn && !offlineUsable()) _error.value = "Không khởi tạo được engine đọc giọng nói"
+                    tts = null
+                }
             }
+        } catch (e: Throwable) { // ROM không có/engine hệ thống hỏng: vẫn chạy bằng giọng tích hợp hoặc online
+            sysFailed = true
+            if (!cloudOn && !offlineUsable()) _error.value = "Không khởi tạo được engine đọc giọng nói"
+            return
         }
         t.setOnUtteranceProgressListener(listener)
         tts = t
     }
+
+    private fun offlineUsable() = OfflineVietnameseTts.usable(context)
+
+    private fun viTag(tag: String) = tag.equals("vi", true) || tag.startsWith("vi-", true)
+
+    /** Nạp sẵn model ở nền để bình luận đầu tiên không phải chờ. */
+    private fun warmUpOffline() {
+        val e = offlineEngine() ?: return
+        scope.launch { e.warmUp() }
+    }
+
+    private fun offlineEngine(): OfflineVietnameseTts? = try {
+        offlineVi ?: synchronized(this) { offlineVi ?: OfflineVietnameseTts(context).also { offlineVi = it } }
+    } catch (e: Throwable) { null }
 
     private fun complete(id: String, ok: Boolean) {
         _speaking.value = false
@@ -90,10 +116,11 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
      * ngoại tuyến, chất lượng cao) để tiếng Anh đọc bằng giọng Anh, tiếng Trung đọc bằng giọng Trung, v.v.
      */
     fun applyLang(s: AppSettings, langTag: String, voiceName: String): String? {
-        curLang = langTag; curGender = s.ttsGender; curRate = s.ttsRate; curPitch = s.ttsPitch; useCloud = s.ttsCloud
+        curLang = langTag; curGender = s.ttsGender; curRate = s.ttsRate; curPitch = s.ttsPitch; useCloud = s.ttsCloud; viFirst = s.ttsViOffline
+        val viOk = viTag(langTag) && offlineUsable() // tiếng Việt đã có giọng tích hợp -> không cần engine hệ thống
         val t = tts
         if (t == null || !sysReady) {
-            if (cloudOn) return null
+            if (cloudOn || viOk) { if (viOk) _error.value = null; return null }
             if (sysFailed) _error.value = "Không khởi tạo được engine đọc giọng nói"
             return "Engine đọc chưa sẵn sàng"
         }
@@ -105,7 +132,7 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
         var r = t.setLanguage(want)
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) r = t.setLanguage(Locale(want.language))
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-            if (cloudOn) return null // đã có giọng online, bỏ qua thiếu dữ liệu của engine hệ thống
+            if (cloudOn || viOk) { if (viOk) _error.value = null; return null } // đã có giọng online/tích hợp, bỏ qua thiếu dữ liệu của engine hệ thống
             _error.value = "Thiếu dữ liệu giọng ${voiceLangOf(langTag).native}. Cài trong Cài đặt Android > Chuyển văn bản thành giọng nói"
             return _error.value
         }
@@ -125,39 +152,52 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
 
     fun voices(): List<Voice> = runCatching { tts?.voices?.toList().orEmpty() }.getOrDefault(emptyList())
 
-    /** Đọc và chờ đến khi xong. Trả false nếu lỗi hoặc bị dừng. */
+    /**
+     * Đọc và chờ đến khi xong. Trả false nếu lỗi hoặc bị dừng.
+     * Thứ tự cho tiếng Việt: giọng tích hợp (nếu bật) -> giọng online -> giọng tích hợp -> engine hệ thống.
+     * Nhờ vậy máy không có engine TTS (ROM nội địa, K8A…) vẫn đọc được tiếng Việt.
+     */
     suspend fun speak(text: String, volume: Float = 1f): Boolean {
         stopRequested = false
+        val vi = isVietnamese() && offlineUsable()
+        var triedOffline = false
+        if (vi && viFirst) {
+            triedOffline = true
+            if (speakOfflineVietnamese(text, volume) == true) return true
+            if (stopRequested) return false
+        }
         if (cloudOn) {
-            val cloudResult = speakCloud(text, volume)
-            if (cloudResult == true) return true
-            // A cloud/network failure should not make Vietnamese comments silent on ROMs
-            // that have no Vietnamese system voice. Keep cloud playback as first choice.
-            if ((cloudResult == null || cloudResult == false) && isVietnamese() && !stopRequested) {
-                speakOfflineVietnamese(text, volume)?.let { if (it) return true }
-            }
-            if (cloudResult == false && stopRequested) return false // user pressed Stop; don't restart speech
-        } else if (isVietnamese()) {
-            speakOfflineVietnamese(text, volume)?.let { if (it) return true }
+            if (speakCloud(text, volume) == true) return true
+            if (stopRequested) return false // người dùng bấm Dừng: không đọc lại
+        }
+        if (vi && !triedOffline) {
+            if (speakOfflineVietnamese(text, volume) == true) return true
+            if (stopRequested) return false
         }
         return speakSystem(text, volume)
     }
 
     private fun isVietnamese() = curLang.equals("vi", true) || curLang.startsWith("vi-", true)
 
-    /** null means model/runtime unavailable; false means synthesis/playback failed. */
+    /** null: model/runtime không dùng được; false: tổng hợp/phát lỗi hoặc bị dừng; true: đọc xong. */
     private suspend fun speakOfflineVietnamese(text: String, volume: Float): Boolean? {
-        val engine = try {
-            offlineVi ?: synchronized(this) {
-                offlineVi ?: OfflineVietnameseTts(context).also { offlineVi = it }
-            }
-        } catch (e: Throwable) {
-            _error.value = "Không khởi tạo được giọng Việt offline: ${e.message ?: "lỗi model"}"
+        val engine = offlineEngine() ?: run {
+            _error.value = "Không khởi tạo được giọng Việt tích hợp"
             return null
         }
-        return runCatching { engine.speak(text, volume, curRate) }
-            .onFailure { _error.value = "Giọng Việt offline gặp lỗi: ${it.message ?: "không phát được"}" }
-            .getOrNull()
+        _speaking.value = true
+        val r = try {
+            engine.speak(text, volume, curRate)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            _error.value = "Giọng Việt tích hợp gặp lỗi: ${e.message ?: "không phát được"}"
+            return null
+        } finally {
+            _speaking.value = false
+        }
+        if (r) _error.value = null
+        return r
     }
 
     /** true = đọc xong, false = bị dừng/lỗi phát, null = không lấy được giọng online (rơi về engine hệ thống). */

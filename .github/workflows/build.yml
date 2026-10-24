@@ -48,7 +48,11 @@ jobs:
           MODEL_DIR="$(dirname "$MODEL")"
           cp "$MODEL" app/src/main/assets/tts_vi/
           cp "$MODEL_DIR/tokens.txt" app/src/main/assets/tts_vi/
-          if [ -d "$MODEL_DIR/espeak-ng-data" ]; then cp -a "$MODEL_DIR/espeak-ng-data" app/src/main/assets/tts_vi/; fi
+          # espeak-ng-data BẮT BUỘC: thiếu thì giọng native sập cả app, nên fail build thay vì phát hành APK lỗi.
+          test -d "$MODEL_DIR/espeak-ng-data" || { echo "::error::thiếu espeak-ng-data trong gói giọng"; exit 1; }
+          cp -a "$MODEL_DIR/espeak-ng-data" app/src/main/assets/tts_vi/
+          test -s app/src/main/assets/tts_vi/tokens.txt
+          test "$(stat -c %s app/src/main/assets/tts_vi/vi_VN-vais1000-medium.onnx)" -gt 1000000
           ls -lh app/libs/sherpa-onnx-1.13.8.aar app/src/main/assets/tts_vi/
 
       - name: Unit tests

@@ -1,6 +1,7 @@
 package com.tlv.app.live
 
 import com.tlv.app.filter.CommentFilter
+import com.tlv.app.filter.EventText
 import com.tlv.app.history.SessionDao
 import com.tlv.app.history.SessionEntity
 import com.tlv.app.settings.AppSettings
@@ -24,7 +25,8 @@ class LiveEngine(
     private val ownerId: () -> String,
     private val token: suspend () -> String?,
     private val bridge: suspend () -> String,
-    private val eventSound: (kind: String) -> Unit,
+    /** Phát âm meme theo loại (follow/share/gift/idle) và CHỜ phát xong (tối đa vài giây). */
+    private val eventSound: suspend (kind: String) -> Unit,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var connectJob: Job? = null
@@ -51,6 +53,9 @@ class LiveEngine(
     val active: Boolean get() = _conn.value.let { it !is ConnState.Idle && it !is ConnState.Failed && it !is ConnState.Ended }
 
     private val queue = ArrayDeque<Long>() // id bình luận chờ đọc
+    /** Hàng chờ riêng cho theo dõi / chia sẻ / tặng quà: được đọc trước bình luận, lần lượt từng người. */
+    private class LiveEvent(val id: Long, val kind: String, val who: String, val gift: String, var count: Int)
+    private val events = ArrayDeque<LiveEvent>()
     private val byId = HashMap<Long, Comment>()
     private val recent = ArrayDeque<String>()
     private val spokenTimes = ArrayDeque<Long>()
@@ -92,13 +97,15 @@ class LiveEngine(
         synchronized(lock) {
             queue.forEach { id -> byId[id]?.let { put(it.copy(status = CommentStatus.FILTERED, filterNote = "Đã xóa khỏi hàng đợi")) } }
             queue.clear()
+            events.forEach { ev -> byId[ev.id]?.let { put(it.copy(status = CommentStatus.FILTERED, filterNote = "Đã xóa khỏi hàng đợi")) } }
+            events.clear()
             publishStats()
         }
     }
 
     fun clearComments() {
         synchronized(lock) {
-            queue.clear(); byId.clear(); recent.clear()
+            queue.clear(); events.clear(); byId.clear(); recent.clear()
             _comments.value = emptyList()
             publishStats()
         }
@@ -109,17 +116,17 @@ class LiveEngine(
         tts.ensureInit()
         withTimeoutOrNull(4000) { tts.ready.first { it } } ?: return "Engine đọc chưa sẵn sàng"
         tts.apply(settings())?.let { return it }
-        return if (tts.speak(text, settings().ttsVolume)) null else "Không đọc được"
+        return if (tts.speak(text, settings().ttsVolume)) null else (tts.error.value ?: "Không đọc được")
     }
 
     private fun resetCounters() {
-        queue.clear(); byId.clear(); recent.clear(); spokenTimes.clear()
+        queue.clear(); events.clear(); byId.clear(); recent.clear(); spokenTimes.clear()
         _comments.value = emptyList()
         received = 0; spoken = 0; filtered = 0
         publishStats()
     }
 
-    private fun publishStats() { _stats.value = Stats(received, spoken, queue.size, filtered) }
+    private fun publishStats() { _stats.value = Stats(received, spoken, queue.size + events.size, filtered) }
 
     private fun put(c: Comment) {
         byId[c.id] = c
@@ -130,7 +137,7 @@ class LiveEngine(
         }
         // giữ map gọn theo danh sách hiển thị
         if (byId.size > COMMENT_CAP * 2) {
-            val keep = _comments.value.map { it.id }.toSet() + queue
+            val keep = _comments.value.map { it.id }.toSet() + queue + events.map { it.id }
             byId.keys.retainAll(keep)
         }
     }
@@ -176,20 +183,26 @@ class LiveEngine(
     }
 
     private fun onEvent(kind: String, user: String, name: String, count: Int) {
-        eventSound(kind)
-        val s = settings()
-        if (!s.announceEvents) return
-        val who = user.ifBlank { "Một người xem" }
-        val line = when (kind) {
-            "follow" -> "$who đã theo dõi"
-            "share" -> "$who đã chia sẻ"
-            else -> "$who đã tặng ${if (count > 1) "$count " else ""}${name.ifBlank { "quà" }}"
-        }
+        val who = EventText.cleanName(user)
         synchronized(lock) {
-            if (queue.size >= s.queueMax) return
+            val s = settings()
+            // Quà liên tiếp cùng người, cùng loại: gộp số lượng. Theo dõi/chia sẻ trùng người đang chờ: bỏ.
+            events.lastOrNull()?.let { last ->
+                if (kind == "gift" && last.kind == kind && last.who == who && last.gift == name) {
+                    last.count = (last.count + count).coerceAtMost(9999)
+                    byId[last.id]?.let { put(it.copy(text = EventText.line(s.ttsLang, kind, who, name, last.count))) }
+                    return
+                }
+            }
+            if (kind != "gift" && events.any { it.kind == kind && it.who == who }) return
+            while (events.size >= EVENT_CAP) {
+                val old = events.removeFirst()
+                byId[old.id]?.let { put(it.copy(status = CommentStatus.FILTERED, filterNote = "Hàng chờ đầy")) }
+            }
             val id = nextId++
-            put(Comment(id, user, line, System.currentTimeMillis(), CommentStatus.PENDING, "event"))
-            queue.addLast(id); publishStats()
+            events.addLast(LiveEvent(id, kind, who, name, count.coerceAtLeast(1)))
+            put(Comment(id, user.take(64), EventText.line(s.ttsLang, kind, who, name, count), System.currentTimeMillis(), CommentStatus.PENDING, "event"))
+            publishStats()
         }
         wake.trySend(Unit)
     }
@@ -246,12 +259,70 @@ class LiveEngine(
         }
     }
 
+    private fun hasWork() = synchronized(lock) { queue.isNotEmpty() || events.isNotEmpty() }
+
+    /** Đọc 1 sự kiện: phát âm meme (chờ xong) rồi đọc "tên + đã theo dõi/chia sẻ/tặng quà". */
+    private suspend fun handleEvent(ev: LiveEvent) {
+        val s = settings()
+        val backlog = synchronized(lock) { events.size }
+        val shown = synchronized(lock) {
+            byId[ev.id]?.copy(status = CommentStatus.SPEAKING)?.also { put(it); publishStats() }
+        }
+        _current.value = shown
+        // Hàng chờ dài thì bỏ âm meme để đọc kịp, tránh trễ hàng phút.
+        if (backlog < 4) {
+            try { eventSound(ev.kind) } catch (e: CancellationException) { throw e } catch (_: Throwable) { }
+        }
+        var ok = true
+        if (s.announceEvents) {
+            val line = EventText.line(s.ttsLang, ev.kind, ev.who, ev.gift, ev.count)
+            tts.applyLang(s, s.ttsLang, s.ttsVoice)
+            ok = tts.speak(line, s.ttsVolume)
+        }
+        synchronized(lock) {
+            if (ok && s.announceEvents) spoken++
+            byId[ev.id]?.let { put(it.copy(status = if (ok) CommentStatus.SPOKEN else CommentStatus.FILTERED, filterNote = if (ok) "" else "Lỗi đọc")) }
+            publishStats()
+        }
+    }
+
+    /**
+     * Hết hàng chờ: đợi một chút, rồi phát âm meme "đợi" và lặp lại sau mỗi [AppSettings.memeIdleGap] giây
+     * cho tới khi có bình luận/sự kiện mới (lúc đó tắt ngay để đọc tiếp). Trả về khi có việc mới.
+     */
+    private suspend fun idleWait() {
+        if (settings().memeIdle == "off") { wake.receive(); return }
+        if (withTimeoutOrNull(1500) { wake.receive() } != null) return
+        while (currentCoroutineContext().isActive) {
+            if (_paused.value || hasWork()) return
+            val woke = coroutineScope {
+                val play = launch { try { eventSound("idle") } catch (e: CancellationException) { throw e } catch (_: Throwable) { } }
+                val watcher = launch { wake.receive(); play.cancel() }
+                play.join()
+                val w = watcher.isCompleted
+                watcher.cancel()
+                w
+            }
+            if (woke) return
+            val gap = settings().memeIdleGap.coerceIn(3, 300) * 1000L
+            if (withTimeoutOrNull(gap) { wake.receive() } != null) return
+        }
+    }
+
     private suspend fun speakLoop() {
         tts.ready.first { it }
+        var didWork = false
         while (currentCoroutineContext().isActive) {
             if (_paused.value) { wake.receive(); continue }
+            // Sự kiện (theo dõi/chia sẻ/quà) được ưu tiên trước bình luận.
+            val ev = synchronized(lock) { events.removeFirstOrNull() }
+            if (ev != null) { handleEvent(ev); didWork = true; continue }
             val c = synchronized(lock) { queue.removeFirstOrNull()?.let { byId[it] } }
-            if (c == null) { _current.value = null; publishStatsLocked(); wake.receive(); continue }
+            if (c == null) {
+                _current.value = null; publishStatsLocked()
+                if (didWork) idleWait() else wake.receive()
+                continue
+            }
 
             val s = settings()
             // Giới hạn số bình luận đọc mỗi phút
@@ -264,11 +335,11 @@ class LiveEngine(
             }
             synchronized(lock) { put(c.copy(status = CommentStatus.SPEAKING)); publishStats() }
             _current.value = c
-            val line = if (c.filterNote == "event") c.text
-                else if (s.readUsername && c.user.isNotBlank()) "${c.user} nói ${c.text}" else c.text
+            val line = if (s.readUsername && c.user.isNotBlank()) "${c.user} nói ${c.text}" else c.text
             val lang = if (s.ttsAuto) LangDetect.detect(c.text, s.ttsLang) else s.ttsLang
             tts.applyLang(s, lang, if (lang == s.ttsLang) s.ttsVoice else "")
             val ok = tts.speak(line, s.ttsVolume)
+            didWork = true
             spokenTimes.addLast(System.currentTimeMillis())
             synchronized(lock) {
                 if (ok) spoken++
@@ -281,5 +352,6 @@ class LiveEngine(
 
     private fun publishStatsLocked() = synchronized(lock) { publishStats() }
 
-    companion object { const val MAX_ATTEMPTS = 8 }
+    companion object { const val MAX_ATTEMPTS = 8
+        private const val EVENT_CAP = 100 }
 }

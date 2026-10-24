@@ -21,6 +21,11 @@
     public static void checkNotNullExpressionValue(...);
 }
 
+# Sherpa-ONNX gọi ngược từ JNI theo TÊN lớp/trường/hàm: bắt buộc giữ nguyên, nếu không giọng Việt tích hợp sẽ làm app văng.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keepclasseswithmembernames class * { native <methods>; }
+-dontwarn com.k2fsa.sherpa.onnx.**
+
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn javax.annotation.**

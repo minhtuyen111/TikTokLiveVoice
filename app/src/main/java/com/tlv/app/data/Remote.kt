@@ -58,7 +58,7 @@ data class UpdateInfo(val code: Int, val name: String, val url: String, val note
     fun force(current: Int) = minCode > current
 }
 
-val MEME_EVENTS = listOf("follow" to "Theo dõi", "share" to "Chia sẻ", "gift" to "Tặng quà")
+val MEME_EVENTS = listOf("follow" to "Theo dõi", "share" to "Chia sẻ", "gift" to "Tặng quà", "idle" to "Âm đợi (hết hàng chờ)")
 
 /** Dữ liệu dùng chung từ Supabase: địa chỉ máy chủ kết nối (tự động) và thư viện âm thanh meme (admin quản lý). */
 class Remote(private val auth: AuthRepo, private val cachedBridge: () -> String, private val saveBridge: (String) -> Unit) {

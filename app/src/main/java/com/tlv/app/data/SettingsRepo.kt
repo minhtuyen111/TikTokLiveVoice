@@ -32,7 +32,10 @@ class SettingsRepo(private val context: Context) {
         val mFollow = stringPreferencesKey("mFollow")
         val mShare = stringPreferencesKey("mShare")
         val mGift = stringPreferencesKey("mGift")
-        val announce = booleanPreferencesKey("announce")
+        val announce = booleanPreferencesKey("announceEv") // khóa mới: mặc định bật đọc tên người tương tác
+        val mIdle = stringPreferencesKey("mIdle")
+        val idleGap = intPreferencesKey("idleGap")
+        val viOffline = booleanPreferencesKey("viOffline")
         val ttsVol = floatPreferencesKey("ttsVol")
         val ttsAuto = booleanPreferencesKey("ttsAuto")
         val readSym = booleanPreferencesKey("readSym")
@@ -76,6 +79,9 @@ class SettingsRepo(private val context: Context) {
             appLang = p[K.appLang] ?: d.appLang,
             ttsGender = p[K.gender] ?: d.ttsGender,
             ttsCloud = p[K.cloud] ?: d.ttsCloud,
+            ttsViOffline = p[K.viOffline] ?: d.ttsViOffline,
+            memeIdle = p[K.mIdle] ?: d.memeIdle,
+            memeIdleGap = p[K.idleGap] ?: d.memeIdleGap,
         )
     }
 
@@ -96,6 +102,7 @@ class SettingsRepo(private val context: Context) {
             p[K.announce] = s.announceEvents
             p[K.ttsVol] = s.ttsVolume; p[K.ttsAuto] = s.ttsAuto; p[K.readSym] = s.readSymbols; p[K.bgStyle] = s.bgStyle; p[K.appLang] = s.appLang
             p[K.gender] = s.ttsGender; p[K.cloud] = s.ttsCloud
+            p[K.viOffline] = s.ttsViOffline; p[K.mIdle] = s.memeIdle; p[K.idleGap] = s.memeIdleGap
         }
     }
 }

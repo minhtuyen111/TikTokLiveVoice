@@ -32,6 +32,8 @@ android {
         targetSdk = 34
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = "2.${System.getenv("VERSION_CODE") ?: "0"}"
+        // Chỉ đóng gói ABI ARM (mọi điện thoại thật); giảm cỡ APK vì model giọng khá nặng.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "SB_U", "\"${obf(cfg("SUPABASE_URL"))}\"")
         buildConfigField("String", "SB_K", "\"${obf(cfg("SUPABASE_ANON_KEY"))}\"")
         buildConfigField("String", "BRIDGE_E", "\"${obf(cfg("BRIDGE_URL"))}\"")
@@ -73,7 +75,11 @@ android {
         buildConfig = true
     }
     androidResources { noCompress += "onnx" }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    // Giải nén thư viện .so khi cài: tương thích hơn trên ROM nội địa/ROM cũ không nạp được .so trực tiếp từ APK.
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs { useLegacyPackaging = true }
+    }
     lint { checkReleaseBuilds = false; abortOnError = false }
 }
 

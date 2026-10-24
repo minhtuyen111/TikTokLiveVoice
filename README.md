@@ -91,6 +91,12 @@ Chống can thiệp (Lucky Patcher…): số dư nằm ở máy chủ và chỉ 
 - Điều khoản/Chính sách đã viết đầy đủ nhưng nên nhờ luật sư rà soát trước khi phát hành rộng.
 
 
+## Giọng Việt tích hợp (chạy mọi ROM) và hàng chờ sự kiện
+- Tiếng Việt mặc định đọc bằng giọng **nằm trong APK** (sherpa-onnx + Piper), không cần engine TTS của ROM, không cần mạng. Dữ liệu `espeak-ng-data` được chép ra `filesDir` ở lần chạy đầu; có "cầu chì": nếu native từng làm sập app 2 lần, giọng này tự tắt và rơi về online/hệ thống thay vì văng lặp lại.
+- CI **fail build** nếu thiếu `espeak-ng-data`/model, không phát hành APK lỗi.
+- Theo dõi / chia sẻ / tặng quà vào **hàng chờ riêng**, đọc trước bình luận: phát âm meme (chờ xong) rồi đọc "Tên đã theo dõi/chia sẻ/tặng …". Quà liên tiếp cùng người được gộp số lượng.
+- Hết hàng chờ: phát **âm đợi** (loại `idle`, admin thêm trong Quản trị → Âm thanh meme) và lặp lại sau 8–60 giây cho tới khi có người mới. **Chạy lại `supabase/schema.sql`** (hoặc 2 dòng `alter table ... meme_sounds_event_check`) để cho phép loại `idle`.
+
 ## Giọng đọc online (nam/nữ, Azure Neural TTS)
 
 App đọc bằng giọng online (HoaiMy/NamMinh cho tiếng Việt; Anh, Trung, Nhật, Hàn cũng có nam/nữ) qua Edge Function `tts`, khóa Azure chỉ nằm trên Supabase. Mất mạng hoặc lỗi thì tự rơi về engine đọc của hệ thống.

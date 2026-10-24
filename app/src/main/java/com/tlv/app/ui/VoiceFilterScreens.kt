@@ -52,7 +52,7 @@ fun VoiceScreen() {
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Nghe thử giọng", fontWeight = FontWeight.Bold)
-                    Dim(if (ttsReady) (if (s.ttsCloud) "Giọng online sẵn sàng" else "Engine sẵn sàng") else "Đang khởi tạo engine…")
+                    Dim(if (ttsReady) (if (s.ttsViOffline && cur.tag.startsWith("vi")) "Giọng Việt tích hợp sẵn sàng (không cần mạng)" else if (s.ttsCloud) "Giọng online sẵn sàng" else "Engine sẵn sàng") else "Đang khởi tạo engine…")
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -66,7 +66,7 @@ fun VoiceScreen() {
             }, Modifier.fillMaxWidth(), icon = Icons.Filled.PlayArrow,
                 state = if (busy) BtnState.Loading else BtnState.Idle, enabled = ttsReady)
         }
-        if (ttsErr != null && !s.ttsCloud) {
+        if (ttsErr != null && !s.ttsCloud && !(s.ttsViOffline && cur.tag.startsWith("vi"))) {
             GlassCard(Modifier.fillMaxWidth(), tint = Bad) {
                 Text(ttsErr.orEmpty(), color = Bad)
                 Spacer(Modifier.height(8.dp))
@@ -92,6 +92,9 @@ fun VoiceScreen() {
                     }
                 }
             }
+        }
+        SwitchRow("Giọng Việt tích hợp trong app", "Tiếng Việt đọc bằng giọng có sẵn trong app: chạy trên mọi ROM (kể cả ROM nội địa/không có giọng hệ thống), không cần mạng. Tắt để ưu tiên giọng online nam/nữ.", s.ttsViOffline) { v ->
+            Graph.update { copy(ttsViOffline = v) }
         }
         SwitchRow("Giọng chất lượng cao (online)", "Giọng online chất lượng cao cần mạng; khi lỗi, tiếng Việt có giọng offline tích hợp, các ngôn ngữ khác dùng giọng hệ thống.", s.ttsCloud) { v ->
             Graph.update { copy(ttsCloud = v) }

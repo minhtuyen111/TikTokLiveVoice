@@ -86,7 +86,7 @@ object Graph {
             ownerId = { auth.session.value?.userId.orEmpty() },
             token = { auth.validToken() },
             bridge = { remote.bridgeUrl() },
-            eventSound = ::playEvent,
+            eventSound = { kind -> playEventAndWait(kind) },
         )
         scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -106,6 +106,7 @@ object Graph {
                 }
             }
         }
+        loadSavedMemes()
         checkUpdate()
         scope.launch {
             _settings.value = settingsRepo.settingsFirst()
@@ -128,7 +129,26 @@ object Graph {
         }
     }
 
-    suspend fun refreshMemes() { remote.memes()?.let { memeList.value = it } }
+    suspend fun refreshMemes() {
+        remote.memes()?.let { list ->
+            memeList.value = list
+            memePlayer.prefetch(list.map { remote.publicUrl(it.path) })
+            // Lưu danh sách để lần sau (kể cả mất mạng) vẫn phát được âm đã tải.
+            runCatching {
+                val a = org.json.JSONArray()
+                list.forEach { a.put(org.json.JSONObject().put("id", it.id).put("event", it.event).put("title", it.title).put("path", it.path)) }
+                prefs.edit().putString("memes_json", a.toString()).apply()
+            }
+        }
+    }
+    private fun loadSavedMemes() {
+        runCatching {
+            val a = org.json.JSONArray(prefs.getString("memes_json", null) ?: return)
+            memeList.value = (0 until a.length()).mapNotNull { i ->
+                a.optJSONObject(i)?.let { o -> Meme(o.optString("id"), o.optString("event"), o.optString("title"), o.optString("path")) }
+            }
+        }
+    }
     private val prefs get() = appCtx.getSharedPreferences("tlv_misc", Context.MODE_PRIVATE)
 
     /** Lấy thông báo mới nhất của quản trị; chưa xem thì hiện hộp thoại, và báo bằng thông báo hệ thống nếu app đang ở nền. */
@@ -170,13 +190,13 @@ object Graph {
     fun refreshMemesAsync() { scope.launch { refreshMemes() } }
 
     /** Chọn và phát âm thanh meme cho sự kiện theo lựa chọn của người dùng (chỉ chọn trong danh sách của admin). */
-    fun playEvent(kind: String) {
+    suspend fun playEventAndWait(kind: String) {
         val s = _settings.value
-        val sel = when (kind) { "follow" -> s.memeFollow; "share" -> s.memeShare; else -> s.memeGift }
+        val sel = when (kind) { "follow" -> s.memeFollow; "share" -> s.memeShare; "gift" -> s.memeGift; else -> s.memeIdle }
         if (sel == "off") return
         val pool = memeList.value.filter { it.event == kind }
         val m = (if (sel == "random") null else pool.firstOrNull { it.id == sel }) ?: pool.randomOrNull() ?: return
-        memePlayer.play(remote.publicUrl(m.path))
+        memePlayer.playAndWait(remote.publicUrl(m.path), if (kind == "idle") 12_000L else 6_000L)
     }
 
     fun previewMeme(m: Meme) = memePlayer.play(remote.publicUrl(m.path), force = true)
