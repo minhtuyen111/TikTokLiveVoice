@@ -79,7 +79,7 @@ object Graph {
         auth = AuthRepo(sessionStore)
         remote = Remote(auth, { _settings.value.bridgeUrl }, { u -> update { copy(bridgeUrl = u) } })
         memePlayer = MemePlayer(a)
-        tts = TtsController(a, com.tlv.app.tts.CloudTts(a, auth))
+        tts = TtsController(a, com.tlv.app.tts.CloudTts(a, auth), com.tlv.app.tts.GoogleTts(a))
         engine = LiveEngine(
             source = LiveSource(), tts = tts, dao = db.sessions(),
             settings = { _settings.value },

@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Đọc bằng giọng chất lượng cao qua mạng ([CloudTts], nam/nữ) và tự rơi về engine đọc của hệ thống khi mất mạng/lỗi.
  * Nếu máy không có engine hệ thống (ROM nước ngoài) thì vẫn đọc được bằng giọng online.
  */
-class TtsController(private val context: Context, private val cloud: CloudTts? = null) {
+class TtsController(private val context: Context, private val cloud: CloudTts? = null, private val google: GoogleTts? = null) {
     private var tts: TextToSpeech? = null
     @Volatile private var sysReady = false
     @Volatile private var sysFailed = false
@@ -38,6 +38,10 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
     @Volatile private var cloudDownUntil = 0L
     private var player: MediaPlayer? = null
     @Volatile private var offlineVi: OfflineVietnameseTts? = null
+    @Volatile private var useGoogle = true
+    @Volatile private var googleFails = 0
+    @Volatile private var googleDownUntil = 0L
+    private val googleOn get() = google != null && useGoogle
     @Volatile private var viFirst = true // tiếng Việt ưu tiên giọng tích hợp trong app (chạy mọi ROM, không cần mạng)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val cloudOn get() = cloud?.available == true && useCloud
@@ -64,7 +68,7 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
     @Synchronized
     fun ensureInit() {
         // Giọng online hoặc giọng Việt tích hợp không cần engine hệ thống: sẵn sàng ngay.
-        if (cloud?.available == true || offlineUsable()) _ready.value = true
+        if (google != null || cloud?.available == true || offlineUsable()) _ready.value = true
         if (offlineUsable()) warmUpOffline()
         if (tts != null) return
         _error.value = null
@@ -116,11 +120,11 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
      * ngoại tuyến, chất lượng cao) để tiếng Anh đọc bằng giọng Anh, tiếng Trung đọc bằng giọng Trung, v.v.
      */
     fun applyLang(s: AppSettings, langTag: String, voiceName: String): String? {
-        curLang = langTag; curGender = s.ttsGender; curRate = s.ttsRate; curPitch = s.ttsPitch; useCloud = s.ttsCloud; viFirst = s.ttsViOffline
+        curLang = langTag; curGender = s.ttsGender; curRate = s.ttsRate; curPitch = s.ttsPitch; useCloud = s.ttsCloud; useGoogle = s.ttsGoogle; viFirst = s.ttsViOffline
         val viOk = viTag(langTag) && offlineUsable() // tiếng Việt đã có giọng tích hợp -> không cần engine hệ thống
         val t = tts
         if (t == null || !sysReady) {
-            if (cloudOn || viOk) { if (viOk) _error.value = null; return null }
+            if (cloudOn || viOk || googleOn) { if (viOk) _error.value = null; return null }
             if (sysFailed) _error.value = "Không khởi tạo được engine đọc giọng nói"
             return "Engine đọc chưa sẵn sàng"
         }
@@ -132,7 +136,7 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
         var r = t.setLanguage(want)
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) r = t.setLanguage(Locale(want.language))
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-            if (cloudOn || viOk) { if (viOk) _error.value = null; return null } // đã có giọng online/tích hợp, bỏ qua thiếu dữ liệu của engine hệ thống
+            if (cloudOn || viOk || googleOn) { if (viOk) _error.value = null; return null } // đã có giọng online/tích hợp, bỏ qua thiếu dữ liệu của engine hệ thống
             _error.value = "Thiếu dữ liệu giọng ${voiceLangOf(langTag).native}. Cài trong Cài đặt Android > Chuyển văn bản thành giọng nói"
             return _error.value
         }
@@ -157,8 +161,14 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
      * Thứ tự cho tiếng Việt: giọng tích hợp (nếu bật) -> giọng online -> giọng tích hợp -> engine hệ thống.
      * Nhờ vậy máy không có engine TTS (ROM nội địa, K8A…) vẫn đọc được tiếng Việt.
      */
-    suspend fun speak(text: String, volume: Float = 1f): Boolean {
+    suspend fun speak(raw: String, volume: Float = 1f): Boolean {
         stopRequested = false
+        // Tiếng Việt: đổi số/viết tắt/tiếng lóng thành chữ để không bị bỏ sót hay đọc sai.
+        val text = if (isVietnamese()) com.tlv.app.filter.ViText.normalize(raw).ifBlank { raw } else raw
+        if (googleOn) {
+            if (speakGoogle(text, volume) == true) return true
+            if (stopRequested) return false
+        }
         val vi = isVietnamese() && offlineUsable()
         var triedOffline = false
         if (vi && viFirst) {
@@ -200,6 +210,31 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
         return r
     }
 
+    /** Giọng chị Google: true = xong, false = bị dừng/lỗi phát, null = không tải được (rơi về giọng khác). */
+    private suspend fun speakGoogle(text: String, volume: Float): Boolean? {
+        val g = google ?: return null
+        if (System.currentTimeMillis() < googleDownUntil) return null
+        val files = g.fetch(text, curLang)
+        if (files == null) {
+            if (++googleFails >= 2) { googleDownUntil = System.currentTimeMillis() + 30_000; googleFails = 0 }
+            return null
+        }
+        googleFails = 0
+        try {
+            for (f in files) {
+                if (stopRequested) return false
+                val id = UUID.randomUUID().toString()
+                val d = CompletableDeferred<Boolean>()
+                pending[id] = d
+                try {
+                    withContext(Dispatchers.Main) { startPlayer(f, volume, id, tune = true) }
+                    if (!d.await()) return false
+                } finally { pending.remove(id) }
+            }
+            return true
+        } finally { _speaking.value = false }
+    }
+
     /** true = đọc xong, false = bị dừng/lỗi phát, null = không lấy được giọng online (rơi về engine hệ thống). */
     private suspend fun speakCloud(text: String, volume: Float): Boolean? {
         val c = cloud ?: return null
@@ -224,7 +259,7 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
         }
     }
 
-    private fun startPlayer(f: File, volume: Float, id: String) {
+    private fun startPlayer(f: File, volume: Float, id: String, tune: Boolean = false) {
         stopPlayer()
         val v = volume.coerceIn(0f, 1f)
         val mp = MediaPlayer()
@@ -233,7 +268,10 @@ class TtsController(private val context: Context, private val cloud: CloudTts? =
             AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
         )
         mp.setVolume(v, v)
-        mp.setOnPreparedListener { _speaking.value = true; it.start() }
+        mp.setOnPreparedListener {
+            if (tune) runCatching { it.playbackParams = it.playbackParams.setSpeed(curRate.coerceIn(0.5f, 2f)).setPitch(curPitch.coerceIn(0.5f, 2f)) }
+            _speaking.value = true; it.start()
+        }
         mp.setOnCompletionListener { stopPlayer(); complete(id, true) }
         mp.setOnErrorListener { _, _, _ -> stopPlayer(); complete(id, false); true }
         runCatching { mp.setDataSource(f.absolutePath); mp.prepareAsync() }.onFailure { stopPlayer(); complete(id, false) }

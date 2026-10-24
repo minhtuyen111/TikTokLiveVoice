@@ -7,6 +7,7 @@ data class AppSettings(
     val ttsLang: String = "vi-VN",
     val ttsVoice: String = "",
     val ttsGender: String = "female", // "female" | "male": giọng nữ/nam của giọng online
+    val ttsGoogle: Boolean = true, // giọng "chị Google" (Google Dịch) làm giọng chính; mất mạng thì rơi về giọng tích hợp
     val ttsViOffline: Boolean = true, // tiếng Việt dùng giọng tích hợp trong app trước (chạy mọi ROM, không cần mạng)
     val ttsCloud: Boolean = true, // dùng giọng online chất lượng cao (tự rơi về giọng hệ thống khi mất mạng)
     val readUsername: Boolean = true,

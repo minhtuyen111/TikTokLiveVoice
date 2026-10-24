@@ -22,6 +22,20 @@ class CoreTests {
         assertEquals("", com.tlv.app.filter.EventText.cleanName("😀😀"))
     }
 
+    @Test fun vietnameseNormalize() {
+        val v = com.tlv.app.filter.ViText
+        assertEquals("hai mươi mốt", v.numToVi(21))
+        assertEquals("một trăm linh năm", v.numToVi(105))
+        assertEquals("hai nghìn không trăm hai mươi bốn", v.numToVi(2024))
+        assertEquals("mười lăm", v.numToVi(15))
+        assertEquals("tôi không biết", v.normalize("tôi ko biết"))
+        assertEquals("năm nghìn", v.normalize("5k"))
+        assertEquals("một nghìn", v.normalize("1.000"))
+        assertEquals("ba phẩy năm", v.normalize("3,5"))
+        assertEquals("không chín không một", v.normalize("0901"))
+        assertEquals("ha ha", v.normalize("kkkkk"))
+    }
+
     @Test fun usernameRules() {
         assertNull(Validators.username("viet_123"))
         assertNotNull(Validators.username("ab"))

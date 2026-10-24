@@ -36,6 +36,7 @@ class SettingsRepo(private val context: Context) {
         val mIdle = stringPreferencesKey("mIdle")
         val idleGap = intPreferencesKey("idleGap")
         val viOffline = booleanPreferencesKey("viOffline")
+        val google = booleanPreferencesKey("ttsGoogle")
         val ttsVol = floatPreferencesKey("ttsVol")
         val ttsAuto = booleanPreferencesKey("ttsAuto")
         val readSym = booleanPreferencesKey("readSym")
@@ -80,6 +81,7 @@ class SettingsRepo(private val context: Context) {
             ttsGender = p[K.gender] ?: d.ttsGender,
             ttsCloud = p[K.cloud] ?: d.ttsCloud,
             ttsViOffline = p[K.viOffline] ?: d.ttsViOffline,
+            ttsGoogle = p[K.google] ?: d.ttsGoogle,
             memeIdle = p[K.mIdle] ?: d.memeIdle,
             memeIdleGap = p[K.idleGap] ?: d.memeIdleGap,
         )
@@ -102,7 +104,7 @@ class SettingsRepo(private val context: Context) {
             p[K.announce] = s.announceEvents
             p[K.ttsVol] = s.ttsVolume; p[K.ttsAuto] = s.ttsAuto; p[K.readSym] = s.readSymbols; p[K.bgStyle] = s.bgStyle; p[K.appLang] = s.appLang
             p[K.gender] = s.ttsGender; p[K.cloud] = s.ttsCloud
-            p[K.viOffline] = s.ttsViOffline; p[K.mIdle] = s.memeIdle; p[K.idleGap] = s.memeIdleGap
+            p[K.viOffline] = s.ttsViOffline; p[K.google] = s.ttsGoogle; p[K.mIdle] = s.memeIdle; p[K.idleGap] = s.memeIdleGap
         }
     }
 }
