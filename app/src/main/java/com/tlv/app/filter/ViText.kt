@@ -30,6 +30,8 @@ object ViText {
 
     fun normalize(text: String): String {
         var t = text
+        // Nhận tiếng cười TRƯỚC khi thu gọn chữ lặp (nếu không "kkkkk" bị thu thành "k").
+        t = WORD.replace(t) { m -> if (LAUGH.matches(m.value)) "ha ha" else m.value }
         t = REPEAT.replace(t) { it.groupValues[1] } // quááááá -> quá
         t = K_SUFFIX.replace(t) { numWords(it.groupValues[1]) + " nghìn" }
         t = THOUSANDS.replace(t) { numWords(it.value.replace(".", "")) }
