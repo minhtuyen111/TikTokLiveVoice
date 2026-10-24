@@ -47,6 +47,9 @@ internal class OfflineVietnameseTts(context: Context) {
         private const val DATA_VERSION = "vais1000-r2"
         private const val PREFS = "tlv_tts_guard"
         private const val MIN_MODEL_BYTES = 1_000_000L
+        private const val CLARITY_SPEED = 0.93f // đọc chậm hơn ~7% cho rõ chữ
+        private const val PRESENCE = 0.35f      // độ nhấn dải cao
+        private const val TARGET_PEAK = 0.92f   // chuẩn hóa đỉnh âm lượng
 
         @Volatile private var bundledCache: Boolean? = null
         @Volatile private var guardChecked = false
@@ -131,6 +134,10 @@ internal class OfflineVietnameseTts(context: Context) {
             model = File(root, MODEL).absolutePath,
             tokens = File(root, "tokens.txt").absolutePath,
             dataDir = File(root, "espeak-ng-data").absolutePath, // PHẢI là đường dẫn thật, không phải đường dẫn assets
+            // Giảm nhiễu ngẫu nhiên của VITS: giọng sạch, ít rè, phát âm rõ chữ hơn (mặc định Piper 0.667 / 0.8).
+            noiseScale = 0.35f,
+            noiseScaleW = 0.5f,
+            lengthScale = 1.0f,
         )
         val cfg = OfflineTtsConfig(
             model = OfflineTtsModelConfig(vits = vits, numThreads = 2, debug = false, provider = "cpu"),
@@ -169,8 +176,8 @@ internal class OfflineVietnameseTts(context: Context) {
         lock.withLock {
             stopped.set(false)
             try {
-                val generated = getEngine().generate(clean, sid = 0, speed = rate.coerceIn(0.65f, 1.8f))
-                val samples = generated.samples
+                val generated = getEngine().generate(clean, sid = 0, speed = (rate * CLARITY_SPEED).coerceIn(0.6f, 1.8f))
+                val samples = clarify(generated.samples)
                 val sr = generated.sampleRate
                 if (samples.isEmpty() || sr <= 0) return@withLock false
                 if (stopped.get()) return@withLock false
@@ -230,6 +237,28 @@ internal class OfflineVietnameseTts(context: Context) {
                 releaseTrack()
             }
         }
+    }
+
+    /** Làm rõ tiếng: bỏ lệch DC, nhấn nhẹ dải cao (phụ âm s, x, t, ch dễ nghe hơn), rồi chuẩn hóa âm lượng. */
+    private fun clarify(src: FloatArray): FloatArray {
+        if (src.isEmpty()) return src
+        var mean = 0f
+        for (v in src) mean += v
+        mean /= src.size
+        val out = FloatArray(src.size)
+        var prev = 0f
+        var peak = 0.0001f
+        for (i in src.indices) {
+            val x = src[i] - mean
+            val y = x + PRESENCE * (x - prev) // pre-emphasis nhẹ
+            prev = x
+            out[i] = y
+            val a = if (y < 0) -y else y
+            if (a > peak) peak = a
+        }
+        val g = TARGET_PEAK / peak
+        for (i in out.indices) out[i] *= g
+        return out
     }
 
     fun stop() {
