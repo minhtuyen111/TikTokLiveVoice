@@ -20,7 +20,7 @@ object ViText {
         "admin" to "quản trị viên", "live" to "lai", "follow" to "theo dõi", "share" to "chia sẻ", "like" to "lai",
     )
 
-    private val LAUGH = Regex("^(?:k{2,}|(?:h[aeiêăâ]){2,}h?|(?:ha)+h?)$", RegexOption.IGNORE_CASE)
+    private val LAUGH = Regex("^(?:k{2,}|(?:h[aeiêăâ]){2,}h?|(?:ha){2,}h?)$", RegexOption.IGNORE_CASE)
     private val REPEAT = Regex("(\\p{L})\\1{2,}")
     private val K_SUFFIX = Regex("(\\d+)\\s?[kK](?![\\p{L}\\d])")
     private val THOUSANDS = Regex("\\d{1,3}(?:\\.\\d{3})+(?!\\d)")
@@ -43,7 +43,7 @@ object ViText {
         t = DIGITS.replace(t) { numWords(it.value) }
         t = WORD.replace(t) { m ->
             val w = m.value
-            if (LAUGH.matches(w)) "ha ha" else SLANG[w.lowercase()] ?: w
+            SLANG[w.lowercase()] ?: w
         }
         return t.replace(Regex("\\s+"), " ").trim()
     }
